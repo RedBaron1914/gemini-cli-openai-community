@@ -7,6 +7,19 @@ import { AuthManager } from "../auth";
 import { GeminiApiClient } from "../gemini-client";
 import { createOpenAIStreamTransformer } from "../stream-transformer";
 
+// Helper function to remove thinking blocks from message content
+function stripThinkingBlocks(messages: ChatCompletionRequest["messages"]): ChatCompletionRequest["messages"] {
+	if (!messages) return [];
+	const thinkingRegex = /<thinking>[\s\S]*?<\/thinking>\s*/g;
+	return messages.map((msg) => {
+		if (typeof msg.content === "string") {
+			return { ...msg, content: msg.content.replace(thinkingRegex, "") };
+		}
+		// Note: This doesn't handle array content, as thinking blocks are not expected there.
+		return msg;
+	});
+}
+
 /**
  * OpenAI-compatible API routes for models and chat completions.
  */
@@ -27,20 +40,110 @@ OpenAIRoute.get("/models", async (c) => {
 	});
 });
 
+// Retrieve a specific model
+OpenAIRoute.get("/models/:model", async (c) => {
+	const modelId = c.req.param("model");
+	const allRealModels = getAllModelIds();
+
+	if (allRealModels.includes(modelId)) {
+		const modelData = {
+			id: modelId,
+			object: "model",
+			created: Math.floor(Date.now() / 1000),
+			owned_by: OPENAI_MODEL_OWNER
+		};
+		return c.json(modelData);
+	} else {
+		return c.json({ error: "Model not found" }, 404);
+	}
+});
+
 // Chat completions endpoint
 OpenAIRoute.post("/chat/completions", async (c) => {
 	try {
 		console.log("Chat completions request received");
 		const body = await c.req.json<ChatCompletionRequest>();
+		// --- Chub.AI Compatibility: Handle 'template' field ---
+		// If 'messages' is missing but a 'template' field is present, create a messages array from it.
+		if (!body.messages && (body as any).template) {
+			console.log("Handling non-standard 'template' field for compatibility.");
+			body.messages = [{ role: "user", content: (body as any).template }];
+		}
+		// --- End Compatibility ---
+
 		const model = body.model || DEFAULT_MODEL;
 		const messages = body.messages || [];
 		// OpenAI API compatibility: stream defaults to true unless explicitly set to false
 		const stream = body.stream !== false;
 
-		// Check environment settings for real thinking
+		// Extract system prompt and user/assistant messages first to allow for prompt-based commands
+		let systemPrompt = "";
+		const otherMessages = messages.filter((msg) => {
+			if (msg.role === "system") {
+				// Handle system messages with both string and array content
+				if (typeof msg.content === "string") {
+					systemPrompt = msg.content;
+				} else if (Array.isArray(msg.content)) {
+					// For system messages, only extract text content
+					const textContent = msg.content
+						.filter((part) => part.type === "text")
+						.map((part) => part.text || "")
+						.join(" ");
+					systemPrompt = textContent;
+				}
+				return false;
+			}
+			return true;
+		});
+
+		// Handle commands from system prompt (gives users control in limited UIs)
+		const effortRegex = /reasoning_effort=(low|medium|high|none)\s*/i;
+		const showRegex = /show_reasoning=(true|false)\s*/i;
+		const cleanRegex = /clean_context=(true|false)\s*/i;
+		const promptEffortMatch = systemPrompt.match(effortRegex);
+		const promptShowMatch = systemPrompt.match(showRegex);
+		const promptCleanMatch = systemPrompt.match(cleanRegex);
+		let effortFromPrompt: string | null = null;
+		let showReasoning = true; // Default to showing reasoning if it happens
+		let cleanContext = true; // Default to cleaning the context
+
+		if (promptEffortMatch) {
+			effortFromPrompt = promptEffortMatch[1].toLowerCase();
+			systemPrompt = systemPrompt.replace(effortRegex, "").trim(); // Clean the prompt
+			console.log(`Reasoning effort '${effortFromPrompt}' detected in system prompt.`);
+		}
+
+		if (promptShowMatch) {
+			showReasoning = promptShowMatch[1].toLowerCase() === "true";
+			systemPrompt = systemPrompt.replace(showRegex, "").trim(); // Clean the prompt
+			console.log(`Show reasoning set to '${showReasoning}' from system prompt.`);
+		}
+
+		if (promptCleanMatch) {
+			cleanContext = promptCleanMatch[1].toLowerCase() === "true";
+			systemPrompt = systemPrompt.replace(cleanRegex, "").trim(); // Clean the prompt
+			console.log(`Clean context set to '${cleanContext}' from system prompt.`);
+		}
+
+		// Determine the final reasoning effort, giving precedence to the system prompt
+		const reasoning_effort =
+			effortFromPrompt || // Precedence for prompt
+			body.reasoning_effort ||
+			body.extra_body?.reasoning_effort ||
+			body.model_params?.reasoning_effort;
+
+		// Determine if reasoning should be included at all
 		const isRealThinkingEnabled = c.env.ENABLE_REAL_THINKING === "true";
-		let includeReasoning = isRealThinkingEnabled; // Automatically enable reasoning when real thinking is enabled
-		let thinkingBudget = body.thinking_budget ?? DEFAULT_THINKING_BUDGET; // Default to dynamic allocation
+		const includeReasoning = reasoning_effort ? reasoning_effort !== "none" : isRealThinkingEnabled;
+
+		// --- End Reasoning Configuration ---
+
+		// Conditionally clean thinking blocks from the history before sending to the model
+		const cleanedMessages = cleanContext ? stripThinkingBlocks(otherMessages) : otherMessages;
+
+		// --- DEBUG: Log the cleaned messages to verify stripping ---
+		// console.log("Cleaned messages being sent to model:", JSON.stringify(cleanedMessages, null, 2));
+		// --- END DEBUG ---
 
 		// Newly added parameters
 		const generationOptions = {
@@ -54,29 +157,6 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			response_format: body.response_format
 		};
 
-		// Handle effort level mapping to thinking_budget (check multiple locations for client compatibility)
-		const reasoning_effort =
-			body.reasoning_effort || body.extra_body?.reasoning_effort || body.model_params?.reasoning_effort;
-		if (reasoning_effort) {
-			includeReasoning = true; // Effort implies reasoning
-			const isFlashModel = model.includes("flash");
-			switch (reasoning_effort) {
-				case "low":
-					thinkingBudget = 1024;
-					break;
-				case "medium":
-					thinkingBudget = isFlashModel ? 12288 : 16384;
-					break;
-				case "high":
-					thinkingBudget = isFlashModel ? 24576 : 32768;
-					break;
-				case "none":
-					thinkingBudget = 0;
-					includeReasoning = false;
-					break;
-			}
-		}
-
 		const tools = body.tools;
 		const tool_choice = body.tool_choice;
 
@@ -85,7 +165,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			messageCount: messages.length,
 			stream,
 			includeReasoning,
-			thinkingBudget,
+			reasoning_effort,
 			tools,
 			tool_choice
 		});
@@ -121,26 +201,6 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			);
 		}
 
-		// Extract system prompt and user/assistant messages
-		let systemPrompt = "";
-		const otherMessages = messages.filter((msg) => {
-			if (msg.role === "system") {
-				// Handle system messages with both string and array content
-				if (typeof msg.content === "string") {
-					systemPrompt = msg.content;
-				} else if (Array.isArray(msg.content)) {
-					// For system messages, only extract text content
-					const textContent = msg.content
-						.filter((part) => part.type === "text")
-						.map((part) => part.text || "")
-						.join(" ");
-					systemPrompt = textContent;
-				}
-				return false;
-			}
-			return true;
-		});
-
 		// Initialize services
 		const authManager = new AuthManager(c.env);
 		const geminiClient = new GeminiApiClient(c.env, authManager);
@@ -166,11 +226,12 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			(async () => {
 				try {
 					console.log("Starting stream generation");
-					const geminiStream = geminiClient.streamContent(model, systemPrompt, otherMessages, {
+					const geminiStream = geminiClient.streamContent(model, systemPrompt, cleanedMessages, {
 						includeReasoning,
-						thinkingBudget,
+						reasoning_effort: reasoning_effort || undefined, // Pass the string effort
 						tools,
 						tool_choice,
+						showReasoning,
 						...generationOptions
 					});
 
@@ -197,21 +258,19 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 				headers: {
 					"Content-Type": "text/event-stream",
 					"Cache-Control": "no-cache",
-					Connection: "keep-alive",
-					"Access-Control-Allow-Origin": "*",
-					"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-					"Access-Control-Allow-Headers": "Content-Type, Authorization"
+					Connection: "keep-alive"
 				}
 			});
 		} else {
 			// Non-streaming response
 			try {
 				console.log("Starting non-streaming completion");
-				const completion = await geminiClient.getCompletion(model, systemPrompt, otherMessages, {
+				const completion = await geminiClient.getCompletion(model, systemPrompt, cleanedMessages, {
 					includeReasoning,
-					thinkingBudget,
+					reasoning_effort: reasoning_effort || undefined,
 					tools,
 					tool_choice,
+					showReasoning,
 					...generationOptions
 				});
 

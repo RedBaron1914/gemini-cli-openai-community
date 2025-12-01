@@ -146,39 +146,28 @@ export class GenerationConfigValidator {
 		const modelInfo = geminiCliModels[modelId];
 		const isThinkingModel = modelInfo?.thinking || false;
 
-		if (isThinkingModel) {
-			let thinkingBudget = options.thinking_budget ?? DEFAULT_THINKING_BUDGET;
-
-			// Handle reasoning effort mapping to thinking budget
+		if (isThinkingModel && includeReasoning && isRealThinkingEnabled) {
 			const reasoning_effort =
 				options.reasoning_effort || options.extra_body?.reasoning_effort || options.model_params?.reasoning_effort;
+			const effort = reasoning_effort && this.isValidEffortLevel(reasoning_effort) ? reasoning_effort : "high";
 
-			if (reasoning_effort && this.isValidEffortLevel(reasoning_effort)) {
-				thinkingBudget = this.mapEffortToThinkingBudget(reasoning_effort, modelId);
-				// If effort is "none", disable reasoning
-				if (reasoning_effort === "none") {
-					includeReasoning = false;
-				} else {
-					includeReasoning = true;
-				}
-			}
-
-			const validatedBudget = this.validateThinkingBudget(modelId, thinkingBudget);
-
-			if (isRealThinkingEnabled && includeReasoning) {
-				// Enable thinking with validated budget
+			// Handle Gemini 3.0 Pro Preview's new 'thinkingLevel' parameter
+			if (modelId === "gemini-3-pro-preview") {
+				const level = (effort === "low" || effort === "none") ? "low" : "high";
+				generationConfig.thinkingConfig = {
+					thinkingLevel: level,
+					includeThoughts: true
+				};
+				console.log(`[GenerationConfig] Real thinking enabled for '${modelId}' with level: '${level}'`);
+			} else {
+				// Handle older models' 'thinkingBudget' parameter
+				const thinkingBudget = this.mapEffortToThinkingBudget(effort, modelId);
+				const validatedBudget = this.validateThinkingBudget(modelId, thinkingBudget);
 				generationConfig.thinkingConfig = {
 					thinkingBudget: validatedBudget,
-					includeThoughts: true // Critical: This enables thinking content in response
+					includeThoughts: true
 				};
 				console.log(`[GenerationConfig] Real thinking enabled for '${modelId}' with budget: ${validatedBudget}`);
-			} else {
-				// For thinking models, always use validated budget (can't use 0)
-				// Control thinking visibility with includeThoughts instead
-				generationConfig.thinkingConfig = {
-					thinkingBudget: this.validateThinkingBudget(modelId, DEFAULT_THINKING_BUDGET),
-					includeThoughts: false // Disable thinking visibility in response
-				};
 			}
 		}
 

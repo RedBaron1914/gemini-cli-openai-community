@@ -25,20 +25,34 @@ const app = new Hono<{ Bindings: Env }>();
 // Add logging middleware
 app.use("*", loggingMiddleware);
 
-// Add CORS headers for all requests
-app.use("*", async (c, next) => {
-	// Set CORS headers
-	c.header("Access-Control-Allow-Origin", "*");
-	c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-	c.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+// Add conditional CORS middleware for all /v1 routes
+app.use("/v1/*", async (c, next) => {
+	const origin = c.req.header("Origin");
 
-	// Handle preflight requests
+	// Handle Preflight Requests
 	if (c.req.method === "OPTIONS") {
-		c.status(204);
-		return c.body(null);
+		const headers = new Headers();
+		headers.set("Access-Control-Allow-Origin", origin || "*");
+		headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+		headers.set("Access-Control-Max-Age", "600");
+		headers.append("Vary", "Origin");
+
+		// Set conditional headers based on origin
+		if (origin === "https://chub.ai") {
+			headers.set("Access-Control-Allow-Headers", "*");
+		} else {
+			headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+		}
+
+		return new Response(null, { status: 204, headers });
 	}
 
+	// Handle Actual Requests
 	await next();
+
+	// Add CORS headers to the response
+	c.res.headers.set("Access-Control-Allow-Origin", origin || "*");
+	c.res.headers.append("Vary", "Origin");
 });
 
 // Apply OpenAI API key authentication middleware to all /v1 routes

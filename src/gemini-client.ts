@@ -177,7 +177,7 @@ export class GeminiApiClient {
 	/**
 	 * Converts a message to Gemini format, handling both text and image content.
 	 */
-	private messageToGeminiFormat(msg: ChatMessage): GeminiFormattedMessage {
+	private async messageToGeminiFormat(msg: ChatMessage): Promise<GeminiFormattedMessage> {
 		const role = msg.role === "assistant" ? "model" : "user";
 
 		// Handle tool call results (tool role in OpenAI format)
@@ -247,23 +247,42 @@ export class GeminiApiClient {
 
 					if (imageUrl.startsWith("data:")) {
 						// Handle base64 encoded images
-						const [mimeType, base64Data] = imageUrl.split(",");
-						const mediaType = mimeType.split(":")[1].split(";")[0];
+						const [header, base64Data] = imageUrl.split(",");
+						if (!base64Data) {
+							throw new Error("Invalid base64 data URL: missing data part.");
+						}
+						const mimeType = header.split(":")[1].split(";")[0];
 
 						parts.push({
 							inlineData: {
-								mimeType: mediaType,
+								mimeType: mimeType,
 								data: base64Data
 							}
 						});
 					} else {
-						// Handle URL images
-						// Note: For better reliability, you might want to fetch the image
-						// and convert it to base64, as Gemini API might have limitations with external URLs
+						// Handle URL images by fetching and converting to base64
+						console.log(`Fetching image from URL: ${imageUrl}`);
+						const imageResponse = await fetch(imageUrl);
+						if (!imageResponse.ok) {
+							throw new Error(`Failed to fetch image from URL: ${imageUrl}. Status: ${imageResponse.status}`);
+						}
+						const imageBuffer = await imageResponse.arrayBuffer();
+
+						// Efficiently convert ArrayBuffer to base64 in a worker environment
+						let binary = "";
+						const bytes = new Uint8Array(imageBuffer);
+						const len = bytes.byteLength;
+						for (let i = 0; i < len; i++) {
+							binary += String.fromCharCode(bytes[i]);
+						}
+						const base64Data = btoa(binary);
+
+						const mimeType = imageResponse.headers.get("Content-Type") || "image/jpeg";
+
 						parts.push({
-							fileData: {
-								mimeType: validation.mimeType || "image/jpeg",
-								fileUri: imageUrl
+							inlineData: {
+								mimeType: mimeType,
+								data: base64Data
 							}
 						});
 					}
@@ -304,7 +323,7 @@ export class GeminiApiClient {
 		messages: ChatMessage[],
 		options?: {
 			includeReasoning?: boolean;
-			thinkingBudget?: number;
+			reasoning_effort?: EffortLevel;
 			tools?: Tool[];
 			tool_choice?: ToolChoice;
 			max_tokens?: number;
@@ -317,12 +336,13 @@ export class GeminiApiClient {
 			response_format?: {
 				type: "text" | "json_object";
 			};
+			showReasoning?: boolean;
 		} & NativeToolsRequestParams
 	): AsyncGenerator<StreamChunk> {
 		await this.authManager.initializeAuth();
 		const projectId = await this.discoverProjectId();
 
-		const contents = messages.map((msg) => this.messageToGeminiFormat(msg));
+		const contents = await Promise.all(messages.map((msg) => this.messageToGeminiFormat(msg)));
 
 		if (systemPrompt) {
 			contents.unshift({ role: "user", parts: [{ text: systemPrompt }] });
@@ -334,25 +354,12 @@ export class GeminiApiClient {
 		const isFakeThinkingEnabled = this.env.ENABLE_FAKE_THINKING === "true";
 		const streamThinkingAsContent = this.env.STREAM_THINKING_AS_CONTENT === "true";
 		const includeReasoning = options?.includeReasoning || false;
-
-		const req = {
-			thinking_budget: options?.thinkingBudget,
-			tools: options?.tools,
-			tool_choice: options?.tool_choice,
-			max_tokens: options?.max_tokens,
-			temperature: options?.temperature,
-			top_p: options?.top_p,
-			stop: options?.stop,
-			presence_penalty: options?.presence_penalty,
-			frequency_penalty: options?.frequency_penalty,
-			seed: options?.seed,
-			response_format: options?.response_format
-		};
+		const showReasoning = options?.showReasoning ?? true;
 
 		// Use the validation helper to create a proper generation config
 		const generationConfig = GenerationConfigValidator.createValidatedConfig(
 			modelId,
-			req,
+			options,
 			isRealThinkingEnabled,
 			includeReasoning
 		);
@@ -406,6 +413,7 @@ export class GeminiApiClient {
 			needsThinkingClose,
 			false,
 			includeReasoning && streamThinkingAsContent,
+			showReasoning,
 			modelId,
 			nativeToolsManager
 		);
@@ -514,6 +522,7 @@ export class GeminiApiClient {
 		needsThinkingClose: boolean = false,
 		isRetry: boolean = false,
 		realThinkingAsContent: boolean = false,
+		showReasoning: boolean = true, // Add showReasoning parameter, default to true
 		originalModel?: string,
 		nativeToolsManager?: NativeToolsManager
 	): AsyncGenerator<StreamChunk> {
@@ -537,6 +546,7 @@ export class GeminiApiClient {
 					needsThinkingClose,
 					true,
 					realThinkingAsContent,
+					showReasoning, // Pass it on
 					originalModel,
 					nativeToolsManager
 				); // Retry once
@@ -568,6 +578,7 @@ export class GeminiApiClient {
 						needsThinkingClose,
 						true,
 						realThinkingAsContent,
+						showReasoning, // Pass it on
 						originalModel,
 						nativeToolsManager
 					);
@@ -592,8 +603,8 @@ export class GeminiApiClient {
 
 			if (candidate?.content?.parts) {
 				for (const part of candidate.content.parts as GeminiPart[]) {
-					// Handle real thinking content from Gemini
-					if (part.thought === true && part.text) {
+					// Handle real thinking content from Gemini - only if showReasoning is true
+					if (showReasoning && part.thought === true && part.text) {
 						const thinkingText = part.text;
 
 						if (realThinkingAsContent) {
@@ -607,7 +618,7 @@ export class GeminiApiClient {
 							}
 
 							yield {
-								type: "thinking_content",
+									type: "thinking_content",
 								data: thinkingText
 							};
 						} else {
@@ -618,8 +629,8 @@ export class GeminiApiClient {
 							};
 						}
 					}
-					// Check if text content contains <think> tags (based on your original example)
-					else if (part.text && part.text.includes("<think>")) {
+					// Check if text content contains <think> tags (based on your original example) - only if showReasoning is true
+					else if (showReasoning && part.text && part.text.includes("<think>")) {
 						if (realThinkingAsContent) {
 							// Extract thinking content and convert to our format
 							const thinkingMatch = part.text.match(/<think>(.*?)<\/think>/s);
@@ -644,7 +655,7 @@ export class GeminiApiClient {
 								if (hasStartedThinking && !hasClosedThinking) {
 									yield {
 										type: "thinking_content",
-										data: "\n</thinking>\n\n"
+										data: "\n<\/thinking>\n\n"
 									};
 									hasClosedThinking = true;
 								}
@@ -673,7 +684,7 @@ export class GeminiApiClient {
 						if ((needsThinkingClose || (realThinkingAsContent && hasStartedThinking)) && !hasClosedThinking) {
 							yield {
 								type: "thinking_content",
-								data: "\n</thinking>\n\n"
+									data: "\n<\/thinking>\n\n"
 							};
 							hasClosedThinking = true;
 						}
@@ -693,7 +704,7 @@ export class GeminiApiClient {
 						if ((needsThinkingClose || (realThinkingAsContent && hasStartedThinking)) && !hasClosedThinking) {
 							yield {
 								type: "thinking_content",
-								data: "\n</thinking>\n\n"
+									data: "\n<\/thinking>\n\n"
 							};
 							hasClosedThinking = true;
 						}
@@ -735,7 +746,7 @@ export class GeminiApiClient {
 		messages: ChatMessage[],
 		options?: {
 			includeReasoning?: boolean;
-			thinkingBudget?: number;
+			reasoning_effort?: EffortLevel;
 			tools?: Tool[];
 			tool_choice?: ToolChoice;
 			max_tokens?: number;
@@ -748,6 +759,7 @@ export class GeminiApiClient {
 			response_format?: {
 				type: "text" | "json_object";
 			};
+			showReasoning?: boolean;
 		} & NativeToolsRequestParams
 	): Promise<{
 		content: string;

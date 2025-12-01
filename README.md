@@ -24,25 +24,23 @@ Transform Google's Gemini models into OpenAI-compatible endpoints using Cloudfla
 
 | Model ID | Context Window | Max Tokens | Thinking Support | Description |
 |----------|----------------|------------|------------------|-------------|
+| `gemini-3-pro-preview` | 1M | 65K | ✅ | Latest Gemini 3.0 Pro Preview model with advanced reasoning |
 | `gemini-2.5-pro` | 1M | 65K | ✅ | Latest Gemini 2.5 Pro model with reasoning capabilities |
 | `gemini-2.5-flash` | 1M | 65K | ✅ | Fast Gemini 2.5 Flash model with reasoning capabilities |
 | `gemini-2.5-flash-lite` | 1M | 65K | ✅ | Lightweight version of Gemini 2.5 Flash model with reasoning capabilities |
 
-> **Note:** Gemini 2.5 models have thinking enabled by default. The API automatically manages this:
-> - When real thinking is disabled (environment), thinking budget is set to 0 to disable it
-> - When real thinking is enabled (environment), thinking budget defaults to -1 (dynamic allocation by Gemini)
+> **Note on "Thinking"**:
+> The `thinking` capability is controlled by passing `reasoning_effort` in the request body or via a system prompt command. This proxy is aware of API differences between model generations.
+> - For **Gemini 3.x models**, `reasoning_effort: "high"` is translated to the `thinkingLevel: "high"` API parameter.
+> - For **Gemini 2.x models**, `reasoning_effort: "high"` is translated to a numerical `thinkingBudget` (e.g., 32768 tokens).
 >
-> **Thinking support** has two modes:
-> - **Fake thinking**: Set `ENABLE_FAKE_THINKING=true` to generate synthetic reasoning text (good for testing)
-> - **Real thinking**: Set `ENABLE_REAL_THINKING=true` to use Gemini's native reasoning capabilities
-> 
-> Real thinking is controlled entirely by the `ENABLE_REAL_THINKING` environment variable. You can optionally set a `"thinking_budget"` in your request (token limit for reasoning, -1 for dynamic allocation, 0 to disable thinking entirely).
+> You can enable the visibility of the thinking process by setting the `ENABLE_REAL_THINKING=true` environment variable.
 
 - **Reasoning Effort Support**: You can control the reasoning effort of thinking models by including `reasoning_effort` in the request body (e.g., `extra_body` or `model_params`). This parameter allows you to fine-tune the model's internal reasoning process, balancing between speed and depth of thought.
-  - `none`: Disables thinking (`thinking_budget = 0`).
-  - `low`: Sets `thinking_budget = 1024`.
-  - `medium`: Sets `thinking_budget = 12288` for flash models, `16384` for other models.
-  - `high`: Sets `thinking_budget = 24576` for flash models, `32768` for other models.
+  - `none`: Disables thinking.
+  - `low`: Use minimal reasoning.
+  - `medium`: Use a balanced amount of reasoning.
+  - `high`: Use maximum reasoning for the best quality responses.
 > 
 > Set `STREAM_THINKING_AS_CONTENT=true` to stream reasoning as content with `<thinking>` tags (DeepSeek R1 style) instead of using the reasoning field.
 
@@ -150,7 +148,45 @@ npm run deploy
 npm run dev
 ```
 
-## 🔧 Configuration
+## Additional Features (Fork)
+
+This fork introduces several commands that can be passed in the system prompt to control the model's reasoning (thinking) behavior on a per-request basis. This is especially useful for clients that do not allow modifying request bodies.
+
+### System Prompt Commands
+
+You can use the following commands by adding them to your system prompt:
+
+1.  **`reasoning_effort=(low|medium|high|none)`**
+    *   **Purpose:** Controls whether the model should perform reasoning and how much budget to allocate for it.
+    *   **Usage:** `reasoning_effort=high`
+    *   **Details:** This activates the thinking process. `high` allocates a large token budget for thinking, potentially resulting in better, more thought-out responses. `none` disables it.
+
+2.  **`show_reasoning=(true|false)`**
+    *   **Purpose:** Controls whether the thinking process (the `<thinking>...</thinking>` block) is visible in the chat response.
+    *   **Default:** `true`
+    *   **Usage:** `show_reasoning=false`
+    *   **Details:** You can have the model think to get a better answer (`reasoning_effort=high`) but hide the process from the final output.
+
+3.  **`clean_context=(true|false)`**
+    *   **Purpose:** Controls whether the `<thinking>...</thinking>` blocks from previous messages are removed from the context before being sent to the model.
+    *   **Default:** `true`
+    *   **Usage:** `clean_context=false`
+    *   **Details:** It is highly recommended to leave this enabled (`true`) to prevent the model from getting confused by its own previous thoughts. Disable it only if your client has its own method for cleaning the context or for specific debugging purposes.
+
+### Example
+
+To get a high-quality response without seeing the thinking process and ensuring the context remains clean, you would put this in your system prompt:
+
+```
+Your main prompt for the character...
+
+reasoning_effort=high
+show_reasoning=false
+```
+
+## Original README
+
+
 
 ### Environment Variables
 
@@ -604,9 +640,10 @@ The worker supports multimodal conversations with images for vision-capable mode
 #### Supported Image Formats
 - JPEG, PNG, GIF, WebP
 - Base64 encoded (recommended for reliability)
-- External URLs (may have limitations with some services)
+- External URLs (now reliably handled by the proxy, which fetches the image directly)
 
 #### Vision-Capable Models
+- `gemini-3-pro-preview`
 - `gemini-2.5-pro`
 - `gemini-2.5-flash` 
 - `gemini-2.0-flash-001`
