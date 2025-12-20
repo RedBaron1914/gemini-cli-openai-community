@@ -151,8 +151,8 @@ export class GenerationConfigValidator {
 				options.reasoning_effort || options.extra_body?.reasoning_effort || options.model_params?.reasoning_effort;
 			const effort = reasoning_effort && this.isValidEffortLevel(reasoning_effort) ? reasoning_effort : "high";
 
-			// Handle Gemini 3.0 Pro Preview's new 'thinkingLevel' parameter
-			if (modelId === "gemini-3-pro-preview") {
+			// Handle Gemini 3.0 series (Pro and Flash) using the new 'thinkingLevel' parameter
+			if (modelId.includes("gemini-3")) {
 				const level = (effort === "low" || effort === "none") ? "low" : "high";
 				generationConfig.thinkingConfig = {
 					thinkingLevel: level,
