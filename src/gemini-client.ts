@@ -428,7 +428,6 @@ export class GeminiApiClient {
 
 		const streamRequest: {
 			model: string;
-			project: string;
 			request: {
 				contents: unknown;
 				generationConfig: unknown;
@@ -438,7 +437,6 @@ export class GeminiApiClient {
 			};
 		} = {
 			model: modelId,
-			project: projectId,
 			request: {
 				contents: contents,
 				generationConfig,
@@ -454,6 +452,7 @@ export class GeminiApiClient {
 
 		yield* this.performStreamRequest(
 			streamRequest,
+			projectId,
 			needsThinkingClose,
 			false,
 			includeReasoning && streamThinkingAsContent,
@@ -562,22 +561,30 @@ export class GeminiApiClient {
 	 * Performs the actual stream request with retry logic for 401 errors and auto model switching for rate limits.
 	 */
 	private async *performStreamRequest(
-		streamRequest: unknown,
+		streamRequest: any, // Using any here because we are modifying it
+		projectId: string,
 		needsThinkingClose: boolean = false,
 		isRetry: boolean = false,
 		realThinkingAsContent: boolean = false,
-		showReasoning: boolean = true, // Add showReasoning parameter, default to true
+		showReasoning: boolean = true,
 		originalModel?: string,
 		nativeToolsManager?: NativeToolsManager
 	): AsyncGenerator<StreamChunk> {
 		const citationsProcessor = new CitationsProcessor(this.env);
+
+		// Add project to the request body
+		const finalRequest = {
+			...streamRequest,
+			project: projectId
+		};
+
 		const response = await fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:streamGenerateContent?alt=sse`, {
 			method: "POST",
 			headers: {
 				"Content-Type": "application/json",
 				Authorization: `Bearer ${this.authManager.getAccessToken()}`
 			},
-			body: JSON.stringify(streamRequest)
+			body: JSON.stringify(finalRequest)
 		});
 
 		if (!response.ok) {
