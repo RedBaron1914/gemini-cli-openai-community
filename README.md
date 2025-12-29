@@ -202,6 +202,12 @@ You can use the following commands by adding them to your system prompt:
     *   **Usage:** `clean_context=false`
     *   **Details:** It is highly recommended to leave this enabled (`true`) to prevent the model from getting confused by its own previous thoughts. Disable it only if your client has its own method for cleaning the context or for specific debugging purposes.
 
+4.  **`show_auto_model=(true|false)`**
+    *   **Purpose:** When using an `*-auto` model, this command will show which concrete model was chosen by the Smart Fallback system.
+    *   **Default:** `false`
+    *   **Usage:** `show_auto_model=true`
+    *   **Details:** In streaming mode, a `<model>...</model>` block will appear at the start of the response. In non-streaming mode, an `auto_model_used` field will be added to the JSON response.
+
 ### Example
 
 To get a high-quality response without seeing the thinking process and ensuring the context remains clean, you would put this in your system prompt:
