@@ -24,11 +24,25 @@ Transform Google's Gemini models into OpenAI-compatible endpoints using Cloudfla
 
 | Model ID | Context Window | Max Tokens | Thinking Support | Description |
 |----------|----------------|------------|------------------|-------------|
+| `gemini-pro-auto` | 1M | 65K | ✅ | Auto-switching model: Uses Gemini 3.0 Pro, falls back to 2.5 Pro on quota limit. |
+| `gemini-flash-auto` | 1M | 65K | ✅ | Auto-switching model: Uses Gemini 3.0 Flash, falls back to 2.5 Flash on quota limit. |
 | `gemini-3-pro-preview` | 1M | 65K | ✅ | Latest Gemini 3.0 Pro Preview model with advanced reasoning |
 | `gemini-3-flash-preview` | 1M | 65K | ✅ | Latest Gemini 3.0 Flash Preview model with advanced reasoning |
 | `gemini-2.5-pro` | 1M | 65K | ✅ | Latest Gemini 2.5 Pro model with reasoning capabilities |
 | `gemini-2.5-flash` | 1M | 65K | ✅ | Fast Gemini 2.5 Flash model with reasoning capabilities |
 | `gemini-2.5-flash-lite` | 1M | 65K | ✅ | Lightweight version of Gemini 2.5 Flash model with reasoning capabilities |
+
+> [!NOTE]
+> ### Smart Fallback Models (`*-auto`)
+> This fork introduces two virtual models to intelligently navigate Google's complex quota system: `gemini-pro-auto` and `gemini-flash-auto`.
+>
+> **How it works:**
+> 1. By default, a request to `gemini-pro-auto` will use the dynamic `projectId` to access the latest `gemini-3-pro-preview` model.
+> 2. If you hit the low quota limit on the dynamic project, the proxy will receive a `429` error.
+> 3. It will then automatically **fall back** to using your personal `GEMINI_PROJECT_ID` and retry the request with the `gemini-2.5-pro` model.
+> 4. This fallback mode will remain active for a cooldown period (typically 1 hour or as specified in the error from Google). After the cooldown, it will automatically try to use Gemini 3.0 again.
+>
+> **Requirement:** For the fallback mechanism to work, you **must** have your personal `GEMINI_PROJECT_ID` set in your environment variables. Without it, there is no project to fall back to.
 
 > [!IMPORTANT]
 > ### A Note on `projectId` and Model Access
