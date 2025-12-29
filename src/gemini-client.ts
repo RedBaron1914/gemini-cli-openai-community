@@ -110,14 +110,19 @@ export class GeminiApiClient {
 	/**
 	 * Discovers the Google Cloud project ID. Uses the environment variable if provided.
 	 */
-	public async discoverProjectId(): Promise<string> {
+	public async discoverProjectId(projectIdHint: string | null = null): Promise<string> {
+		// If a specific project ID is provided, use it.
+		if (projectIdHint) {
+			return projectIdHint;
+		}
+
+		// Otherwise, follow the discovery logic.
 		if (this.env.GEMINI_PROJECT_ID) {
 			return this.env.GEMINI_PROJECT_ID;
 		}
-		if (this.projectId) {
-			return this.projectId;
-		}
 
+		// We removed the in-memory this.projectId cache to make it more predictable.
+		// Now we rely on the KV cache.
 		try {
 			const initialProjectId = "default-project";
 			const loadResponse = (await this.authManager.callEndpoint("loadCodeAssist", {
@@ -126,7 +131,6 @@ export class GeminiApiClient {
 			})) as ProjectDiscoveryResponse;
 
 			if (loadResponse.cloudaicompanionProject) {
-				this.projectId = loadResponse.cloudaicompanionProject;
 				return loadResponse.cloudaicompanionProject;
 			}
 			throw new Error("Project ID discovery failed. Please set the GEMINI_PROJECT_ID environment variable.");
@@ -357,6 +361,7 @@ export class GeminiApiClient {
 	 */
 	async *streamContent(
 		modelId: string,
+		projectId: string,
 		systemPrompt: string,
 		messages: ChatMessage[],
 		options?: {
@@ -378,8 +383,6 @@ export class GeminiApiClient {
 		} & NativeToolsRequestParams
 	): AsyncGenerator<StreamChunk> {
 		await this.authManager.initializeAuth();
-		const projectId = await this.discoverProjectId();
-
 		const contents = await Promise.all(messages.map((msg) => this.messageToGeminiFormat(msg)));
 
 		if (systemPrompt) {
@@ -780,6 +783,7 @@ export class GeminiApiClient {
 	 */
 	async getCompletion(
 		modelId: string,
+		projectId: string,
 		systemPrompt: string,
 		messages: ChatMessage[],
 		options?: {
@@ -810,7 +814,7 @@ export class GeminiApiClient {
 			const tool_calls: Array<{ id: string; type: "function"; function: { name: string; arguments: string } }> = [];
 
 			// Collect all chunks from the stream
-			for await (const chunk of this.streamContent(modelId, systemPrompt, messages, options)) {
+			for await (const chunk of this.streamContent(modelId, projectId, systemPrompt, messages, options)) {
 				if (chunk.type === "text" && typeof chunk.data === "string") {
 					content += chunk.data;
 				} else if (chunk.type === "usage" && typeof chunk.data === "object") {

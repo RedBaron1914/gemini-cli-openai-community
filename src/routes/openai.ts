@@ -5,6 +5,7 @@ import { OPENAI_MODEL_OWNER } from "../config";
 import { DEFAULT_THINKING_BUDGET, MIME_TYPE_MAP } from "../constants";
 import { AuthManager } from "../auth";
 import { GeminiApiClient } from "../gemini-client";
+import { SmartFallbackManager } from "../helpers/smart-fallback-manager";
 import { createOpenAIStreamTransformer } from "../stream-transformer";
 import { isMediaTypeSupported, validateContent, validateModel } from "../utils/validation";
 import { Buffer } from "node:buffer";
@@ -226,6 +227,38 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		const authManager = new AuthManager(c.env);
 		const geminiClient = new GeminiApiClient(c.env, authManager);
 
+		// --- Smart Fallback Logic ---
+		const smartManager = new SmartFallbackManager(c.env);
+		let finalModel = model;
+		let finalProjectId: string | null;
+
+		if (SmartFallbackManager.isAutoModel(model)) {
+			// This is a smart model, let the manager decide
+			const decision = await smartManager.decide(model);
+			finalModel = decision.model;
+			finalProjectId = decision.projectId;
+
+			// If the manager decided to use a dynamic project, we need to discover it.
+			// If it decided on a personal project, projectIdHint is already set.
+			if (decision.mode === 'dynamic') {
+				finalProjectId = await geminiClient.discoverProjectId(null);
+			}
+
+		} else {
+			// For specific models, decide based on whether a personal project ID is set
+			if (c.env.GEMINI_PROJECT_ID) {
+				finalProjectId = c.env.GEMINI_PROJECT_ID;
+			} else {
+				finalProjectId = await geminiClient.discoverProjectId(null);
+			}
+		}
+
+		if (!finalProjectId) {
+			return c.json({ error: "Could not determine a project ID to use." }, 500);
+		}
+		// --- End Smart Fallback Logic ---
+
+
 		// Test authentication first
 		try {
 			await authManager.initializeAuth();
@@ -240,14 +273,14 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			// Streaming response
 			const { readable, writable } = new TransformStream();
 			const writer = writable.getWriter();
-			const openAITransformer = createOpenAIStreamTransformer(model);
+			const openAITransformer = createOpenAIStreamTransformer(finalModel);
 			const openAIStream = readable.pipeThrough(openAITransformer);
 
 			// Asynchronously pipe data from Gemini to transformer
 			(async () => {
 				try {
-					console.log("Starting stream generation");
-					const geminiStream = geminiClient.streamContent(model, systemPrompt, cleanedMessages, {
+					console.log("Starting stream generation with model:", finalModel);
+					const geminiStream = geminiClient.streamContent(finalModel, finalProjectId!, systemPrompt, cleanedMessages, {
 						includeReasoning,
 						reasoning_effort: reasoning_effort || undefined, // Pass the string effort
 						tools,
@@ -261,7 +294,46 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 					}
 					console.log("Stream completed successfully");
 					await writer.close();
-				} catch (streamError: unknown) {
+				} catch (streamError: any) {
+					// --- Smart Fallback on Quota Error ---
+					const isQuotaError = streamError.message?.includes("429");
+					if (isQuotaError && SmartFallbackManager.isAutoModel(model)) {
+						console.log("Smart Fallback: Quota error detected on dynamic project.");
+						// Extract quota reset timestamp
+						try {
+							const errorJson = JSON.parse(streamError.message.substring(streamError.message.indexOf('{')));
+							const quotaResetTimestamp = errorJson?.error?.details?.[0]?.metadata?.quotaResetTimeStamp;
+							
+							if (quotaResetTimestamp) {
+								await smartManager.setCooldown(quotaResetTimestamp);
+								console.log("Smart Fallback: Cooldown set. Retrying with personal project.");
+
+								// Retry the request with the fallback model and personal project
+								const fallbackDecision = await smartManager.decide(model);
+								if (fallbackDecision.mode === 'personal') {
+									const fallbackStream = geminiClient.streamContent(fallbackDecision.model, fallbackDecision.projectId!, systemPrompt, cleanedMessages, {
+										includeReasoning,
+										reasoning_effort: reasoning_effort || undefined,
+										tools,
+										tool_choice,
+										showReasoning,
+										...generationOptions
+									});
+
+									for await (const chunk of fallbackStream) {
+										await writer.write(chunk);
+									}
+									console.log("Smart Fallback: Retry stream completed successfully.");
+									await writer.close();
+									return; // Exit async function after successful retry
+								}
+							}
+						} catch (e) {
+							console.error("Smart Fallback: Failed to parse quota error or retry.", e);
+						}
+					}
+					// --- End Smart Fallback ---
+
 					const errorMessage = streamError instanceof Error ? streamError.message : String(streamError);
 					console.error("Stream error:", errorMessage);
 					// Try to write an error chunk before closing
@@ -284,9 +356,11 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			});
 		} else {
 			// Non-streaming response
+			// Note: Smart fallback is not implemented for non-streaming for simplicity.
+			// It would require a similar try/catch and retry logic.
 			try {
 				console.log("Starting non-streaming completion");
-				const completion = await geminiClient.getCompletion(model, systemPrompt, cleanedMessages, {
+				const completion = await geminiClient.getCompletion(finalModel, finalProjectId!, systemPrompt, cleanedMessages, {
 					includeReasoning,
 					reasoning_effort: reasoning_effort || undefined,
 					tools,
@@ -299,7 +373,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 					id: `chatcmpl-${crypto.randomUUID()}`,
 					object: "chat.completion",
 					created: Math.floor(Date.now() / 1000),
-					model: model,
+					model: model, // Return the original requested model
 					choices: [
 						{
 							index: 0,
