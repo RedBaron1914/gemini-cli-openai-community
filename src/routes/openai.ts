@@ -297,43 +297,23 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 				} catch (streamError: any) {
 					// --- Smart Fallback on Quota Error ---
 					const isQuotaError = streamError.message?.includes("429");
-					if (isQuotaError && SmartFallbackManager.isAutoModel(model)) {
+					if (isQuotaError && SmartFallbackManager.isAutoModel(model) && decision.mode === 'dynamic') {
 						console.log("Smart Fallback: Quota error detected on dynamic project.");
-						// Extract quota reset timestamp
 						try {
 							const errorJson = JSON.parse(streamError.message.substring(streamError.message.indexOf('{')));
 							const quotaResetTimestamp = errorJson?.error?.details?.[0]?.metadata?.quotaResetTimeStamp;
 							
 							if (quotaResetTimestamp) {
 								await smartManager.setCooldown(quotaResetTimestamp);
-								console.log("Smart Fallback: Cooldown set. Retrying with personal project.");
-
-								// Retry the request with the fallback model and personal project
-								const fallbackDecision = await smartManager.decide(model);
-								if (fallbackDecision.mode === 'personal') {
-									const fallbackStream = geminiClient.streamContent(fallbackDecision.model, fallbackDecision.projectId!, systemPrompt, cleanedMessages, {
-										includeReasoning,
-										reasoning_effort: reasoning_effort || undefined,
-										tools,
-										tool_choice,
-										showReasoning,
-										...generationOptions
-									});
-
-									for await (const chunk of fallbackStream) {
-										await writer.write(chunk);
-									}
-									console.log("Smart Fallback: Retry stream completed successfully.");
-									await writer.close();
-									return; // Exit async function after successful retry
-								}
+								console.log("Smart Fallback: Cooldown set for future requests.");
 							}
 						} catch (e) {
-							console.error("Smart Fallback: Failed to parse quota error or retry.", e);
+							console.error("Smart Fallback: Failed to parse quota error or set cooldown.", e);
 						}
 					}
 					// --- End Smart Fallback ---
 
+					// Re-throw the original error to the client after attempting to set cooldown
 					const errorMessage = streamError instanceof Error ? streamError.message : String(streamError);
 					console.error("Stream error:", errorMessage);
 					// Try to write an error chunk before closing
