@@ -10,15 +10,18 @@ import { createOpenAIStreamTransformer } from "../stream-transformer";
 import { isMediaTypeSupported, validateContent, validateModel } from "../utils/validation";
 import { Buffer } from "node:buffer";
 
-// Helper function to remove thinking blocks from message content
-function stripThinkingBlocks(messages: ChatCompletionRequest["messages"]): ChatCompletionRequest["messages"] {
+// Helper function to remove metadata blocks from message content
+function stripMetadataBlocks(messages: ChatCompletionRequest["messages"]): ChatCompletionRequest["messages"] {
 	if (!messages) return [];
 	const thinkingRegex = /<thinking>[\s\S]*?<\/thinking>\s*/g;
+	const modelRegex = /<model>[\s\S]*?<\/model>\s*/g;
+	
 	return messages.map((msg) => {
 		if (typeof msg.content === "string") {
-			return { ...msg, content: msg.content.replace(thinkingRegex, "") };
+			const cleanedContent = msg.content.replace(thinkingRegex, "").replace(modelRegex, "");
+			return { ...msg, content: cleanedContent };
 		}
-		// Note: This doesn't handle array content, as thinking blocks are not expected there.
+		// Note: This doesn't handle array content, as metadata blocks are not expected there.
 		return msg;
 	});
 }
@@ -103,12 +106,17 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		const effortRegex = /reasoning_effort=(low|medium|high|none)\s*/i;
 		const showRegex = /show_reasoning=(true|false)\s*/i;
 		const cleanRegex = /clean_context=(true|false)\s*/i;
+		const showAutoModelRegex = /show_auto_model=(true|false)\s*/i;
+
 		const promptEffortMatch = systemPrompt.match(effortRegex);
 		const promptShowMatch = systemPrompt.match(showRegex);
 		const promptCleanMatch = systemPrompt.match(cleanRegex);
+		const promptShowAutoModelMatch = systemPrompt.match(showAutoModelRegex);
+
 		let effortFromPrompt: string | null = null;
 		let showReasoning = true; // Default to showing reasoning if it happens
 		let cleanContext = true; // Default to cleaning the context
+		let showAutoModel = false; // Default to not showing the auto model
 
 		if (promptEffortMatch) {
 			effortFromPrompt = promptEffortMatch[1].toLowerCase();
@@ -128,6 +136,17 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			console.log(`Clean context set to '${cleanContext}' from system prompt.`);
 		}
 
+		if (promptShowAutoModelMatch) {
+			showAutoModel = promptShowAutoModelMatch[1].toLowerCase() === "true";
+			systemPrompt = systemPrompt.replace(showAutoModelRegex, "").trim(); // Clean the prompt
+			console.log(`Show auto model set to '${showAutoModel}' from system prompt.`);
+		}
+
+		// Also check body for explicit control
+		if (body.show_auto_model !== undefined) {
+			showAutoModel = body.show_auto_model;
+		}
+
 		// Determine the final reasoning effort, giving precedence to the system prompt
 		const reasoning_effort =
 			effortFromPrompt || // Precedence for prompt
@@ -142,7 +161,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		// --- End Reasoning Configuration ---
 
 		// Conditionally clean thinking blocks from the history before sending to the model
-		const cleanedMessages = cleanContext ? stripThinkingBlocks(otherMessages) : otherMessages;
+		const cleanedMessages = cleanContext ? stripMetadataBlocks(otherMessages) : otherMessages;
 
 		// --- DEBUG: Log the cleaned messages to verify stripping ---
 		// console.log("Cleaned messages being sent to model:", JSON.stringify(cleanedMessages, null, 2));
@@ -279,6 +298,15 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			// Asynchronously pipe data from Gemini to transformer
 			(async () => {
 				try {
+					// If using an auto model and requested, show which model was chosen
+					if (showAutoModel && SmartFallbackManager.isAutoModel(model)) {
+						const modelInfoChunk = {
+							type: "text",
+							data: `<model>${finalModel}</model>\n`
+						};
+						await writer.write(modelInfoChunk);
+					}
+					
 					console.log("Starting stream generation with model:", finalModel);
 					const geminiStream = geminiClient.streamContent(finalModel, finalProjectId!, systemPrompt, cleanedMessages, {
 						includeReasoning,
@@ -374,6 +402,11 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 						completion_tokens: completion.usage.outputTokens,
 						total_tokens: completion.usage.inputTokens + completion.usage.outputTokens
 					};
+				}
+
+				// Add the auto model used if requested
+				if (showAutoModel && SmartFallbackManager.isAutoModel(model)) {
+					(response as any).auto_model_used = finalModel;
 				}
 
 				console.log("Non-streaming completion successful");
