@@ -335,7 +335,6 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		console.error("Top-level error:", e);
 		return c.json({ error: errorMessage }, 500);
 	}
-<<<<<<< HEAD
 });
 
 // Audio transcriptions endpoint

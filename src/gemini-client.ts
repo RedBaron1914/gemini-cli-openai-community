@@ -267,7 +267,6 @@ export class GeminiApiClient {
 							}
 						});
 					} else {
-<<<<<<< HEAD
 						// Handle URL images by fetching and converting to base64
 						console.log(`Fetching image from URL: ${imageUrl}`);
 						const imageResponse = await fetch(imageUrl);
