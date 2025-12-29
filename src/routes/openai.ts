@@ -1,11 +1,13 @@
 import { Hono } from "hono";
-import { Env, ChatCompletionRequest, ChatCompletionResponse } from "../types";
-import { geminiCliModels, DEFAULT_MODEL, getAllModelIds } from "../models";
+import { Env, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ModelInfo, MessageContent } from "../types";
+import { DEFAULT_MODEL, getAllModelIds } from "../models";
 import { OPENAI_MODEL_OWNER } from "../config";
-import { DEFAULT_THINKING_BUDGET } from "../constants";
+import { DEFAULT_THINKING_BUDGET, MIME_TYPE_MAP } from "../constants";
 import { AuthManager } from "../auth";
 import { GeminiApiClient } from "../gemini-client";
 import { createOpenAIStreamTransformer } from "../stream-transformer";
+import { isMediaTypeSupported, validateContent, validateModel } from "../utils/validation";
+import { Buffer } from "node:buffer";
 
 // Helper function to remove thinking blocks from message content
 function stripThinkingBlocks(messages: ChatCompletionRequest["messages"]): ChatCompletionRequest["messages"] {
@@ -175,30 +177,49 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		}
 
 		// Validate model
-		if (!(model in geminiCliModels)) {
-			return c.json(
-				{
-					error: `Model '${model}' not found. Available models: ${getAllModelIds().join(", ")}`
-				},
-				400
-			);
+		const modelValidation = validateModel(model);
+		if (!modelValidation.isValid) {
+			return c.json({ error: modelValidation.error }, 400);
 		}
 
-		// Check if the request contains images and validate model support
-		const hasImages = messages.some((msg) => {
-			if (Array.isArray(msg.content)) {
-				return msg.content.some((content) => content.type === "image_url");
-			}
-			return false;
-		});
+		// Unified media validation
+		const mediaChecks: {
+			type: string;
+			supportKey: keyof ModelInfo;
+			name: string;
+		}[] = [
+			{ type: "image_url", supportKey: "supportsImages", name: "image inputs" },
+			{ type: "input_audio", supportKey: "supportsAudios", name: "audio inputs" },
+			{ type: "input_video", supportKey: "supportsVideos", name: "video inputs" },
+			{ type: "input_pdf", supportKey: "supportsPdfs", name: "PDF inputs" }
+		];
 
-		if (hasImages && !geminiCliModels[model].supportsImages) {
-			return c.json(
-				{
-					error: `Model '${model}' does not support image inputs. Please use a vision-capable model like gemini-2.5-pro or gemini-2.5-flash.`
-				},
-				400
+		for (const { type, supportKey, name } of mediaChecks) {
+			const messagesWithMedia = messages.filter(
+				(msg) => Array.isArray(msg.content) && msg.content.some((content) => content.type === type)
 			);
+
+			if (messagesWithMedia.length > 0) {
+				if (!isMediaTypeSupported(model, supportKey)) {
+					return c.json(
+						{
+							error: `Model '${model}' does not support ${name}. Please use a model that supports this feature.`
+						},
+						400
+					);
+				}
+
+				for (const msg of messagesWithMedia) {
+					for (const content of msg.content as MessageContent[]) {
+						if (content.type === type) {
+							const { isValid, error } = validateContent(type, content);
+							if (!isValid) {
+								return c.json({ error }, 400);
+							}
+						}
+					}
+				}
+			}
 		}
 
 		// Initialize services
@@ -312,6 +333,117 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 	} catch (e: unknown) {
 		const errorMessage = e instanceof Error ? e.message : String(e);
 		console.error("Top-level error:", e);
+		return c.json({ error: errorMessage }, 500);
+	}
+<<<<<<< HEAD
+});
+
+// Audio transcriptions endpoint
+OpenAIRoute.post("/audio/transcriptions", async (c) => {
+	try {
+		console.log("Audio transcription request received");
+		const body = await c.req.parseBody();
+		const file = body["file"];
+		const model = (body["model"] as string) || DEFAULT_MODEL;
+		const prompt = (body["prompt"] as string) || "Transcribe this audio in detail.";
+
+		if (!file || !(file instanceof File)) {
+			return c.json({ error: "File is required" }, 400);
+		}
+
+		// Validate model
+		const modelValidation = validateModel(model);
+		if (!modelValidation.isValid) {
+			return c.json({ error: modelValidation.error }, 400);
+		}
+
+		let mimeType = file.type;
+
+		// Fallback for application/octet-stream
+		if (mimeType === "application/octet-stream" && file.name) {
+			const ext = file.name.split(".").pop()?.toLowerCase();
+			if (ext && MIME_TYPE_MAP[ext]) {
+				mimeType = MIME_TYPE_MAP[ext];
+				console.log(`Detected MIME type from extension .${ext}: ${mimeType}`);
+			}
+		}
+
+		// Check for video or audio support based on MIME type
+		const isVideo = mimeType.startsWith("video/");
+		// gemini can generate transcriptions of videos too
+		const isAudio = mimeType.startsWith("audio/");
+
+		if (isVideo) {
+			if (!isMediaTypeSupported(model, "supportsVideos")) {
+				return c.json(
+					{
+						error: `Model '${model}' does not support video inputs.`
+					},
+					400
+				);
+			}
+		} else if (isAudio) {
+			if (!isMediaTypeSupported(model, "supportsAudios")) {
+				return c.json(
+					{
+						error: `Model '${model}' does not support audio inputs.`
+					},
+					400
+				);
+			}
+		} else {
+			return c.json(
+				{
+					error: `Unsupported media type: ${mimeType}. Only audio and video files are supported.`
+				},
+				400
+			);
+		}
+
+		// Convert File to base64
+		const arrayBuffer = await file.arrayBuffer();
+		console.log(`Processing audio file: size=${arrayBuffer.byteLength} bytes, type=${file.type}`);
+
+		let base64Audio: string;
+		try {
+			base64Audio = Buffer.from(arrayBuffer).toString("base64");
+		} catch (e: unknown) {
+			const errorMessage = e instanceof Error ? e.message : String(e);
+			console.error("Base64 conversion failed:", errorMessage);
+			throw new Error(`Failed to process audio file: ${errorMessage}`);
+		}
+
+		// Construct message
+		const messages: ChatMessage[] = [
+			{
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text: prompt
+					},
+					{
+						type: "input_audio",
+						input_audio: {
+							data: base64Audio,
+							format: mimeType
+						}
+					}
+				]
+			}
+		];
+
+		// Initialize client
+		const authManager = new AuthManager(c.env);
+		const geminiClient = new GeminiApiClient(c.env, authManager);
+
+		// Get completion
+		const completion = await geminiClient.getCompletion(model, "", messages);
+
+		return c.json({ text: completion.content });
+	} catch (e: unknown) {
+		const errorMessage = e instanceof Error ? e.message : String(e);
+		console.error("Transcription error:", errorMessage);
 		return c.json({ error: errorMessage }, 500);
 	}
 });
