@@ -255,7 +255,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 
 		if (SmartFallbackManager.isAutoModel(model)) {
 			// This is a smart model, let the manager decide
-			d =$smartManager.decide(model);
+			decision = await smartManager.decide(model);
 			finalModel = decision.model;
 			finalProjectId = decision.projectId;
 
