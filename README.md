@@ -30,6 +30,20 @@ Transform Google's Gemini models into OpenAI-compatible endpoints using Cloudfla
 | `gemini-2.5-flash` | 1M | 65K | ✅ | Fast Gemini 2.5 Flash model with reasoning capabilities |
 | `gemini-2.5-flash-lite` | 1M | 65K | ✅ | Lightweight version of Gemini 2.5 Flash model with reasoning capabilities |
 
+> [!IMPORTANT]
+> ### A Note on `projectId` and Model Access
+> Accessing models via the Code Assist API is complex, and behavior can vary significantly based on your `projectId` configuration and potentially your Google account's status (region, age, etc.).
+>
+> - **Using a personal `GEMINI_PROJECT_ID`**: If you set this environment variable, you will use your personal project's infrastructure. This generally provides **fast and stable access with higher quotas**, but may be limited to **stable models (e.g., Gemini 2.5)**. For some accounts, this method may not grant access to preview models like Gemini 3.0.
+>
+> - **Without a `GEMINI_PROJECT_ID`**: If you leave the variable unset, the proxy will dynamically fetch a service `projectId` from Google. This is currently the most reliable way to **access preview models (e.g., Gemini 3.0)**. However, be aware that this dynamic project comes with **very low, trial-like quotas** that are not equal to your personal account's limits.
+>
+> **In summary, you face a choice:**
+> - For **stability and higher quotas** with stable models, try setting your `GEMINI_PROJECT_ID`.
+> - For **access to the latest preview models**, remove the `GEMINI_PROJECT_ID` variable and be mindful of the low request limit.
+>
+> This is a result of Google's current backend strategy for rolling out new models and is subject to change without notice.
+
 > **Note on "Thinking"**:
 > The `thinking` capability is controlled by passing `reasoning_effort` in the request body or via a system prompt command. This proxy is aware of API differences between model generations.
 > - For **Gemini 3.x models**, `reasoning_effort: "high"` is translated to the `thinkingLevel: "high"` API parameter.
