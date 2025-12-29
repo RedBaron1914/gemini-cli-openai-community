@@ -108,40 +108,25 @@ export class GeminiApiClient {
 	}
 
 	/**
-	 * Discovers the Google Cloud project ID. Uses the environment variable if provided.
+	 * Fetches the dynamic Google Cloud project ID from the Code Assist API.
 	 */
-	public async discoverProjectId(projectIdHint: string | null = null): Promise<string> {
-		// If a specific project ID is provided, use it.
-		if (projectIdHint) {
-			return projectIdHint;
-		}
-
-		// Otherwise, follow the discovery logic.
-		if (this.env.GEMINI_PROJECT_ID) {
-			return this.env.GEMINI_PROJECT_ID;
-		}
-
-		if (this.projectId) {
-			return this.projectId;
-		}
-
+	public async fetchDynamicProjectId(): Promise<string> {
 		try {
-			const initialProjectId = "default-project";
+			const initialProjectId = "default-project"; // This is a placeholder required by the API
 			const loadResponse = (await this.authManager.callEndpoint("loadCodeAssist", {
 				cloudaicompanionProject: initialProjectId,
 				metadata: { duetProject: initialProjectId }
 			})) as ProjectDiscoveryResponse;
 
 			if (loadResponse.cloudaicompanionProject) {
-				this.projectId = loadResponse.cloudaicompanionProject;
 				return loadResponse.cloudaicompanionProject;
 			}
-			throw new Error("Project ID discovery failed. Please set the GEMINI_PROJECT_ID environment variable.");
+			throw new Error("Dynamic Project ID discovery failed to return a project ID.");
 		} catch (error: unknown) {
 			const errorMessage = error instanceof Error ? error.message : String(error);
-			console.error("Failed to discover project ID:", errorMessage);
+			console.error("Failed to fetch dynamic project ID:", errorMessage);
 			throw new Error(
-				"Could not discover project ID. Make sure you're authenticated and consider setting GEMINI_PROJECT_ID."
+				"Could not fetch dynamic project ID. Please check your authentication."
 			);
 		}
 	}

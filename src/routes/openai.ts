@@ -250,32 +250,27 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		// --- Smart Fallback Logic ---
 		const smartManager = new SmartFallbackManager(c.env);
 		let finalModel = model;
-		let finalProjectId: string | null;
+		let finalProjectId: string;
 		let decision = null;
 
 		if (SmartFallbackManager.isAutoModel(model)) {
 			// This is a smart model, let the manager decide
 			decision = await smartManager.decide(model);
 			finalModel = decision.model;
-			finalProjectId = decision.projectId;
 
-			// If the manager decided to use a dynamic project, we need to discover it.
-			// If it decided on a personal project, projectIdHint is already set.
 			if (decision.mode === 'dynamic') {
-				finalProjectId = await geminiClient.discoverProjectId(null);
-			}
-
-		} else {
-			// For specific models, decide based on whether a personal project ID is set
-			if (c.env.GEMINI_PROJECT_ID) {
+				console.log("Smart Fallback: Attempting to use dynamic project.");
+				finalProjectId = await geminiClient.fetchDynamicProjectId();
+			} else { // mode is 'personal'
+				console.log("Smart Fallback: Cooling down, falling back to personal project.");
+				if (!c.env.GEMINI_PROJECT_ID) {
+					return c.json({ error: "Smart fallback to personal project failed: GEMINI_PROJECT_ID is not set in environment." }, 500);
+				}
 				finalProjectId = c.env.GEMINI_PROJECT_ID;
-			} else {
-				finalProjectId = await geminiClient.discoverProjectId(null);
 			}
-		}
-
-		if (!finalProjectId) {
-			return c.json({ error: "Could not determine a project ID to use." }, 500);
+		} else {
+			// For specific, non-auto models, use personal project if available, otherwise discover dynamic.
+			finalProjectId = c.env.GEMINI_PROJECT_ID || await geminiClient.fetchDynamicProjectId();
 		}
 		// --- End Smart Fallback Logic ---
 
