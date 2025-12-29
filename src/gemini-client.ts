@@ -362,7 +362,7 @@ export class GeminiApiClient {
 	/**
 	 * Stream content from Gemini API.
 	 */
-	await * streamContent(
+	async *streamContent(
 		modelId: string,
 		projectId: string,
 		systemPrompt: string,
@@ -784,7 +784,7 @@ export class GeminiApiClient {
 	/**
 	 * Get a complete response from Gemini API (non-streaming).
 	 */
-	await getCompletion(
+	async getCompletion(
 		modelId: string,
 		projectId: string,
 		systemPrompt: string,
