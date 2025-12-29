@@ -111,26 +111,49 @@ export class GeminiApiClient {
 			return this.projectId;
 		}
 
+		// Check KV cache first
+		try {
+			const cachedProjectId = await this.env.GEMINI_CLI_KV.get("gemini_project_id", "text");
+			if (cachedProjectId) {
+				console.log(`Using cached project ID: ${cachedProjectId}`);
+				this.projectId = cachedProjectId;
+				return cachedProjectId;
+			}
+		} catch (kvError) {
+			console.log("No project ID found in KV cache or KV error:", kvError);
+		}
+
+
 		try {
 			const initialProjectId = "default-project";
-			const loadResponse = (await this.authManager.callEndpoint("loadCodeAssist", {
+			const requestBody = {
 				cloudaicompanionProject: initialProjectId,
-				metadata: { duetProject: initialProjectId }
-			})) as ProjectDiscoveryResponse;
+				metadata: {
+					duetProject: initialProjectId,
+					ideType: "IDE_UNSPECIFIED",
+					platform: "PLATFORM_UNSPECIFIED",
+					pluginType: "GEMINI"
+				}
+			};
+			
+			const loadResponse = (await this.authManager.callEndpoint("loadCodeAssist", requestBody)) as ProjectDiscoveryResponse;
 
 			if (loadResponse.cloudaicompanionProject) {
 				this.projectId = loadResponse.cloudaicompanionProject;
-				return loadResponse.cloudaicompanionProject;
+				
+				// Cache the newly discovered project ID for 1 hour
+				try {
+					await this.env.GEMINI_CLI_KV.put("gemini_project_id", this.projectId, { expirationTtl: 3600 });
+					console.log(`Discovered and cached new project ID: ${this.projectId}`);
+				} catch (kvError) {
+					console.error("Failed to cache discovered project ID:", kvError);
+				}
+
+				return this.projectId;
 			}
-			throw new Error("Project ID discovery failed. Please set the GEMINI_PROJECT_ID environment variable.");
+			throw new Error("Project ID discovery failed. 'cloudaicompanionProject' not found in response.");
 		} catch (error: unknown) {
-			const errorMessage = error instanceof Error ? error.message : String(error);
-			console.error("Failed to discover project ID:", errorMessage);
-			throw new Error(
-				"Could not discover project ID. Make sure you're authenticated and consider setting GEMINI_PROJECT_ID."
-			);
-		}
-	}
+
 
 	/**
 	 * Parses a server-sent event (SSE) stream from the Gemini API.
