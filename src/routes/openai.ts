@@ -11,7 +11,8 @@ import { isMediaTypeSupported, validateContent, validateModel } from "../utils/v
 import { Buffer } from "node:buffer";
 
 // Helper function to remove metadata blocks from message content
-function stripMetadataBlocks(messages: ChatCompletionRequest["messages"]): ChatCompletionRequest["messages"] {
+function stripMetadataBlocks(messages: ChatCompletionRequest["messages"]):
+ ChatCompletionRequest["messages"] {
 	if (!messages) return [];
 	const thinkingRegex = /<thinking>[\s\S]*?<\/thinking>\s*/g;
 	const modelRegex = /<model>[\s\S]*?<\/model>\s*/g;
@@ -250,10 +251,11 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		const smartManager = new SmartFallbackManager(c.env);
 		let finalModel = model;
 		let finalProjectId: string | null;
+		let decision = null;
 
 		if (SmartFallbackManager.isAutoModel(model)) {
 			// This is a smart model, let the manager decide
-			const decision = await smartManager.decide(model);
+			d =$smartManager.decide(model);
 			finalModel = decision.model;
 			finalProjectId = decision.projectId;
 
@@ -290,7 +292,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 
 		if (stream) {
 			// Streaming response
-			const { readable, writable } = new TransformStream();
+			const {readable, writable} = new TransformStream();
 			const writer = writable.getWriter();
 			const openAITransformer = createOpenAIStreamTransformer(finalModel);
 			const openAIStream = readable.pipeThrough(openAITransformer);
@@ -325,7 +327,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 				} catch (streamError: any) {
 					// --- Smart Fallback on Quota Error ---
 					const isQuotaError = streamError.message?.includes("429");
-					if (isQuotaError && SmartFallbackManager.isAutoModel(model) && decision.mode === 'dynamic') {
+					if (isQuotaError && SmartFallbackManager.isAutoModel(model) && decision?.mode === 'dynamic') {
 						console.log("Smart Fallback: Quota error detected on dynamic project.");
 						try {
 							const errorJson = JSON.parse(streamError.message.substring(streamError.message.indexOf('{')));

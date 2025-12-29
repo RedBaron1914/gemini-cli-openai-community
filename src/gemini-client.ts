@@ -121,8 +121,10 @@ export class GeminiApiClient {
 			return this.env.GEMINI_PROJECT_ID;
 		}
 
-		// We removed the in-memory this.projectId cache to make it more predictable.
-		// Now we rely on the KV cache.
+		if (this.projectId) {
+			return this.projectId;
+		}
+
 		try {
 			const initialProjectId = "default-project";
 			const loadResponse = (await this.authManager.callEndpoint("loadCodeAssist", {
@@ -131,6 +133,7 @@ export class GeminiApiClient {
 			})) as ProjectDiscoveryResponse;
 
 			if (loadResponse.cloudaicompanionProject) {
+				this.projectId = loadResponse.cloudaicompanionProject;
 				return loadResponse.cloudaicompanionProject;
 			}
 			throw new Error("Project ID discovery failed. Please set the GEMINI_PROJECT_ID environment variable.");
@@ -251,7 +254,7 @@ export class GeminiApiClient {
 					const imageUrl = content.image_url.url;
 
 					// Validate image URL
-					const { isValid, error, mimeType } = validateContent("image_url", content);
+					const { isValid, error } = validateContent("image_url", content);
 					if (!isValid) {
 						throw new Error(`Invalid image: ${error}`);
 					}
@@ -266,9 +269,9 @@ export class GeminiApiClient {
 
 						parts.push({
 							inlineData: {
-								mimeType: mimeType,
-								data: base64Data
-							}
+							mimeType: mimeType,
+							data: base64Data
+						}
 						});
 					} else {
 						// Handle URL images by fetching and converting to base64
@@ -359,7 +362,7 @@ export class GeminiApiClient {
 	/**
 	 * Stream content from Gemini API.
 	 */
-	async *streamContent(
+	await * streamContent(
 		modelId: string,
 		projectId: string,
 		systemPrompt: string,
@@ -659,7 +662,7 @@ export class GeminiApiClient {
 							}
 
 							yield {
-									type: "thinking_content",
+								type: "thinking_content",
 								data: thinkingText
 							};
 						} else {
@@ -725,7 +728,7 @@ export class GeminiApiClient {
 						if ((needsThinkingClose || (realThinkingAsContent && hasStartedThinking)) && !hasClosedThinking) {
 							yield {
 								type: "thinking_content",
-									data: "\n<\/thinking>\n\n"
+								data: "\n<\/thinking>\n\n"
 							};
 							hasClosedThinking = true;
 						}
@@ -745,7 +748,7 @@ export class GeminiApiClient {
 						if ((needsThinkingClose || (realThinkingAsContent && hasStartedThinking)) && !hasClosedThinking) {
 							yield {
 								type: "thinking_content",
-									data: "\n<\/thinking>\n\n"
+								data: "\n<\/thinking>\n\n"
 							};
 							hasClosedThinking = true;
 						}
@@ -781,7 +784,7 @@ export class GeminiApiClient {
 	/**
 	 * Get a complete response from Gemini API (non-streaming).
 	 */
-	async getCompletion(
+	await getCompletion(
 		modelId: string,
 		projectId: string,
 		systemPrompt: string,
