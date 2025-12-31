@@ -329,7 +329,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 							const quotaResetTimestamp = errorJson?.error?.details?.[0]?.metadata?.quotaResetTimeStamp;
 							
 							if (quotaResetTimestamp) {
-								await smartManager.setCooldown(quotaResetTimestamp);
+								await smartManager.setCooldown(quotaResetTimestamp, model);
 								console.log("Smart Fallback: Cooldown set for future requests.");
 							}
 						} catch (e) {

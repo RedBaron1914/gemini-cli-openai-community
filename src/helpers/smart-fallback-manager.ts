@@ -1,5 +1,5 @@
 import { Env } from "../types";
-import { KV_COOLDOWN_KEY } from "../config";
+import { KV_COOLDOWN_KEY_PRO, KV_COOLDOWN_KEY_FLASH } from "../config";
 
 export type FallbackMode = "dynamic" | "personal";
 
@@ -29,13 +29,21 @@ export class SmartFallbackManager {
 		this.env = env;
 	}
 
+	private getCooldownKey(model: string): string {
+		if (model.includes("pro")) {
+			return KV_COOLDOWN_KEY_PRO;
+		}
+		return KV_COOLDOWN_KEY_FLASH;
+	}
+
 	/**
-	 * Checks if the dynamic projectId is currently in a cooldown period.
+	 * Checks if the dynamic projectId is currently in a cooldown period for a specific model type.
 	 * @returns The timestamp (in milliseconds) until which the cooldown is active, or 0 if not active.
 	 */
-	public async getCooldownUntil(): Promise<number> {
+	public async getCooldownUntil(model: string): Promise<number> {
 		try {
-			const cooldownUntilStr = await this.env.GEMINI_CLI_KV.get(KV_COOLDOWN_KEY);
+			const key = this.getCooldownKey(model);
+			const cooldownUntilStr = await this.env.GEMINI_CLI_KV.get(key);
 			if (cooldownUntilStr) {
 				const cooldownUntil = parseInt(cooldownUntilStr, 10);
 				if (cooldownUntil > Date.now()) {
@@ -49,21 +57,23 @@ export class SmartFallbackManager {
 	}
 
 	/**
-	 * Sets the cooldown period for the dynamic projectId.
+	 * Sets the cooldown period for the dynamic projectId for a specific model type.
 	 * @param quotaResetTimestamp The ISO 8601 timestamp string when the quota resets.
+	 * @param model The auto model that hit the quota limit.
 	 */
-	public async setCooldown(quotaResetTimestamp: string): Promise<void> {
+	public async setCooldown(quotaResetTimestamp: string, model: string): Promise<void> {
 		try {
 			const resetTime = new Date(quotaResetTimestamp).getTime();
 			// Add a 1-minute buffer to be safe
 			const cooldownUntil = resetTime + 60 * 1000;
 			const ttl = Math.ceil((cooldownUntil - Date.now()) / 1000);
+			const key = this.getCooldownKey(model);
 
 			if (ttl > 0) {
-				await this.env.GEMINI_CLI_KV.put(KV_COOLDOWN_KEY, cooldownUntil.toString(), {
+				await this.env.GEMINI_CLI_KV.put(key, cooldownUntil.toString(), {
 					expirationTtl: ttl
 				});
-				console.log(`Smart Fallback: Cooldown set until ${new Date(cooldownUntil).toISOString()}`);
+				console.log(`Smart Fallback: Cooldown for ${model} set until ${new Date(cooldownUntil).toISOString()}`);
 			}
 		} catch (e) {
 			console.error("Failed to set cooldown in KV:", e);
@@ -76,14 +86,14 @@ export class SmartFallbackManager {
 	 * @returns An object with the determined mode, model, and projectId.
 	 */
 	public async decide(requestedModel: string): Promise<FallbackDecision> {
-		const cooldownUntil = await this.getCooldownUntil();
+		const cooldownUntil = await this.getCooldownUntil(requestedModel);
 		const personalProjectId = this.env.GEMINI_PROJECT_ID || null;
 
 		if (cooldownUntil > 0 && personalProjectId) {
 			// Cooldown is active and a personal project ID is available, so we must fall back.
 			const fallbackModel = FALLBACK_MODEL_MAP[requestedModel];
 			if (fallbackModel) {
-				console.log(`Smart Fallback: Cooldown active. Using personal project and model '${fallbackModel}'.`);
+				console.log(`Smart Fallback: Cooldown active for ${requestedModel}. Using personal project and model '${fallbackModel}'.`);
 				return {
 					mode: "personal",
 					model: fallbackModel,
@@ -100,7 +110,7 @@ export class SmartFallbackManager {
 			return {
 				mode: "dynamic",
 				model: dynamicModel,
-				projectId: null // Let GeminiApiClient discover it
+				projectId: null // Let the client discover it
 			};
 		}
 
