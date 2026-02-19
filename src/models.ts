@@ -2,6 +2,19 @@ import { ModelInfo } from "./types";
 
 // --- Gemini CLI Models Configuration ---
 export const geminiCliModels: Record<string, ModelInfo> = {
+	"gemini-3.1-pro-preview": {
+		maxTokens: 65536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsAudios: true,
+		supportsVideos: true,
+		supportsPdfs: true,
+		supportsPromptCache: false,
+		inputPrice: 0,
+		outputPrice: 0,
+		description: "Google's Gemini 3.1 Pro Preview model via OAuth (free tier)",
+		thinking: true
+	},
 	"gemini-3-pro-preview": {
 		maxTokens: 65536,
 		contextWindow: 1_048_576,
