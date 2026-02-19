@@ -153,7 +153,7 @@ export class AuthManager {
 			// Cache for slightly less than the token expiry to be safe
 			const ttlSeconds = Math.floor((expiryDate - Date.now()) / 1000) - 300; // 5 minutes buffer
 
-			if (ttlSeconds > 0) {
+			if (ttlSeconds >= 60) {
 				await this.env.GEMINI_CLI_KV.put(KV_TOKEN_KEY, JSON.stringify(tokenData), {
 					expirationTtl: ttlSeconds
 				});
