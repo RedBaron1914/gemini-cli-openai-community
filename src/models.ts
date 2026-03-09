@@ -2,6 +2,32 @@ import { ModelInfo } from "./types";
 
 // --- Gemini CLI Models Configuration ---
 export const geminiCliModels: Record<string, ModelInfo> = {
+	"gemini-pro-250": {
+		maxTokens: 65536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsAudios: true,
+		supportsVideos: true,
+		supportsPdfs: true,
+		supportsPromptCache: false,
+		inputPrice: 0,
+		outputPrice: 0,
+		description: "Alias for Gemini 3.1 Pro Preview (Cursor compatibility)",
+		thinking: true
+	},
+	"gemini-flash-250": {
+		maxTokens: 65536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsAudios: true,
+		supportsVideos: true,
+		supportsPdfs: true,
+		supportsPromptCache: false,
+		inputPrice: 0,
+		outputPrice: 0,
+		description: "Alias for Gemini 3.0 Flash Preview (Cursor compatibility)",
+		thinking: true
+	},
 	"gemini-3.1-pro-preview": {
 		maxTokens: 65536,
 		contextWindow: 1_048_576,

@@ -73,7 +73,16 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		}
 		// --- End Compatibility ---
 
-		const model = body.model || DEFAULT_MODEL;
+		let model = body.model || DEFAULT_MODEL;
+
+		// --- Cursor & Alias Mapping ---
+		if (model === "gemini-pro-250") {
+			model = "gemini-3.1-pro-preview";
+		} else if (model === "gemini-flash-250") {
+			model = "gemini-3-flash-preview";
+		}
+		// --- End Mapping ---
+
 		const messages = body.messages || [];
 		// OpenAI API compatibility: stream defaults to true unless explicitly set to false
 		const stream = body.stream !== false;

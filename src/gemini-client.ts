@@ -483,10 +483,10 @@ export class GeminiApiClient {
 		const requestPreview = userContent.substring(0, 100) + (userContent.length > 100 ? "..." : "");
 
 		if (streamAsContent) {
-			// DeepSeek R1 style: stream thinking as content with <thinking> tags
+			// DeepSeek R1 style: stream thinking as content with <think> tags
 			yield {
 				type: "thinking_content",
-				data: "<thinking>\n"
+				data: "<think>\n"
 			};
 
 			// Add a small delay after opening tag
@@ -646,11 +646,11 @@ export class GeminiApiClient {
 						const thinkingText = part.text;
 
 						if (realThinkingAsContent) {
-							// Stream as content with <thinking> tags (DeepSeek R1 style)
+							// Stream as content with <think> tags (DeepSeek R1 style)
 							if (!hasStartedThinking) {
 								yield {
 									type: "thinking_content",
-									data: "<thinking>\n"
+									data: "<think>\n"
 								};
 								hasStartedThinking = true;
 							}
@@ -676,7 +676,7 @@ export class GeminiApiClient {
 								if (!hasStartedThinking) {
 									yield {
 										type: "thinking_content",
-										data: "<thinking>\n"
+										data: "<think>\n"
 									};
 									hasStartedThinking = true;
 								}
@@ -693,7 +693,7 @@ export class GeminiApiClient {
 								if (hasStartedThinking && !hasClosedThinking) {
 									yield {
 										type: "thinking_content",
-										data: "\n<\/thinking>\n\n"
+										data: "\n<\/think>\n\n"
 									};
 									hasClosedThinking = true;
 								}
@@ -722,7 +722,7 @@ export class GeminiApiClient {
 						if ((needsThinkingClose || (realThinkingAsContent && hasStartedThinking)) && !hasClosedThinking) {
 							yield {
 								type: "thinking_content",
-									data: "\n<\/thinking>\n\n"
+									data: "\n<\/think>\n\n"
 							};
 							hasClosedThinking = true;
 						}
@@ -742,7 +742,7 @@ export class GeminiApiClient {
 						if ((needsThinkingClose || (realThinkingAsContent && hasStartedThinking)) && !hasClosedThinking) {
 							yield {
 								type: "thinking_content",
-									data: "\n<\/thinking>\n\n"
+									data: "\n<\/think>\n\n"
 							};
 							hasClosedThinking = true;
 						}
