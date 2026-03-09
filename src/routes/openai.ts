@@ -80,6 +80,8 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			model = "gemini-3.1-pro-preview";
 		} else if (model === "gemini-flash-250") {
 			model = "gemini-3-flash-preview";
+		} else if (model === "gemini-flash-lite-250") {
+			model = "gemini-3.1-flash-lite-preview";
 		}
 		// --- End Mapping ---
 

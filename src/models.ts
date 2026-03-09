@@ -2,6 +2,32 @@ import { ModelInfo } from "./types";
 
 // --- Gemini CLI Models Configuration ---
 export const geminiCliModels: Record<string, ModelInfo> = {
+	"gemini-flash-lite-250": {
+		maxTokens: 65536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsAudios: true,
+		supportsVideos: true,
+		supportsPdfs: true,
+		supportsPromptCache: false,
+		inputPrice: 0,
+		outputPrice: 0,
+		description: "Alias for Gemini 3.1 Flash Lite Preview (Cursor compatibility)",
+		thinking: true
+	},
+	"gemini-3.1-flash-lite-preview": {
+		maxTokens: 65536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsAudios: true,
+		supportsVideos: true,
+		supportsPdfs: true,
+		supportsPromptCache: false,
+		inputPrice: 0,
+		outputPrice: 0,
+		description: "Google's Gemini 3.1 Flash Lite Preview model via OAuth (free tier)",
+		thinking: true
+	},
 	"gemini-pro-250": {
 		maxTokens: 65536,
 		contextWindow: 1_048_576,
