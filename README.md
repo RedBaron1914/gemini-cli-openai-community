@@ -25,11 +25,28 @@ Transform Google's Gemini models into OpenAI-compatible endpoints using Cloudfla
 | Model ID | Context Window | Max Tokens | Thinking Support | Description |
 |----------|----------------|------------|------------------|-------------|
 |`gemini-3.1-pro-preview` | 1M | 65K | ✅ | Latest Gemini 3.1 Pro Preview model with even more advanced reasoning |
+|`gemini-3.1-flash-lite-preview` | 1M | 65K | ✅ | New Gemini 3.1 Flash Lite model - Google's fastest and most efficient model |
 | `gemini-3-pro-preview` | 1M | 65K | ✅ | Latest Gemini 3.0 Pro Preview model with advanced reasoning |
 | `gemini-3-flash-preview` | 1M | 65K | ✅ | Latest Gemini 3.0 Flash Preview model with advanced reasoning |
 | `gemini-2.5-pro` | 1M | 65K | ✅ | Latest Gemini 2.5 Pro model with reasoning capabilities |
 | `gemini-2.5-flash` | 1M | 65K | ✅ | Fast Gemini 2.5 Flash model with reasoning capabilities |
 | `gemini-2.5-flash-lite` | 1M | 65K | ✅ | Lightweight version of Gemini 2.5 Flash model with reasoning capabilities |
+
+### 🖱️ Cursor Compatibility (Aliases)
+
+Cursor and some other clients may have hardcoded model lists or prevent adding models that they "already know." To bypass this and use your proxy's higher quotas, use these special aliases in Cursor's **OpenAI section**:
+
+| Alias | Maps To | Use Case |
+|-------|---------|----------|
+| `gemini-pro-250` | `gemini-3.1-pro-preview` | High-quality reasoning with 250 msg/day quota |
+| `gemini-flash-lite-250` | `gemini-3.1-flash-lite-preview` | Ultra-fast responses with high quota |
+| `gemini-flash-250` | `gemini-3-flash-preview` | Stable flash model with high quota |
+
+**How to use in Cursor:**
+1. Go to `Settings` -> `Models` -> `OpenAI`.
+2. Set **Override Base URL** to your worker URL (e.g., `https://your-worker.workers.dev/v1`).
+3. Under **Custom Models**, click `+ Add Model` and type `gemini-pro-250`.
+4. Turn off the official "Gemini" toggle in Cursor to ensure all requests go through your proxy.
 
 > [!IMPORTANT]
 > ### A Note on `projectId` and Model Access
