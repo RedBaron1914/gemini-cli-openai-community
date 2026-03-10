@@ -244,7 +244,7 @@ export class GeminiApiClient {
 				for (const response of (msg as any)._tool_responses) {
 					parts.push({
 						functionResponse: {
-							name: response.id || "unknown_function",
+							name: response.name || "unknown_function",
 							response: {
 								result: typeof response.content === "string" ? response.content : JSON.stringify(response.content)
 							}
@@ -626,7 +626,8 @@ export class GeminiApiClient {
 		realThinkingAsContent: boolean = false,
 		showReasoning: boolean = true, // Add showReasoning parameter, default to true
 		originalModel?: string,
-		nativeToolsManager?: NativeToolsManager
+		nativeToolsManager?: NativeToolsManager,
+		retryCount: number = 0
 	): AsyncGenerator<StreamChunk> {
 		const citationsProcessor = new CitationsProcessor(this.env);
 		const response = await fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:streamGenerateContent?alt=sse`, {
@@ -639,6 +640,8 @@ export class GeminiApiClient {
 		});
 
 		if (!response.ok) {
+			const errorText = await response.text();
+
 			if (response.status === 401 && !isRetry) {
 				console.log("Got 401 error in stream request, clearing token cache and retrying...");
 				await this.authManager.clearTokenCache();
@@ -648,9 +651,10 @@ export class GeminiApiClient {
 					needsThinkingClose,
 					true,
 					realThinkingAsContent,
-					showReasoning, // Pass it on
+					showReasoning,
 					originalModel,
-					nativeToolsManager
+					nativeToolsManager,
+					retryCount
 				); // Retry once
 				return;
 			}
@@ -680,17 +684,42 @@ export class GeminiApiClient {
 						needsThinkingClose,
 						true,
 						realThinkingAsContent,
-						showReasoning, // Pass it on
+						showReasoning,
 						originalModel,
-						nativeToolsManager
+						nativeToolsManager,
+						0 // Reset retry count for the new model
 					);
 					return;
 				}
 			}
 
-			const errorText = await response.text();
+			// Handle transient 429/499 rate limits with delay (Agent/Tool call rapid requests)
+			if ((response.status === 429 || response.status === 499) && retryCount < 3) {
+				const match = errorText.match(/Please retry in ([\d.]+)s/);
+				let delayMs = Math.pow(2, retryCount) * 1000; // Exponential backoff fallback: 1s, 2s, 4s
+				
+				if (match && match[1]) {
+					delayMs = parseFloat(match[1]) * 1000;
+				}
+				
+				console.log(`[GeminiAPI] Rate limited (${response.status}). Waiting ${delayMs.toFixed(0)}ms before retrying (Attempt ${retryCount + 1}/3)...`);
+				await new Promise(resolve => setTimeout(resolve, delayMs));
+				
+				yield* this.performStreamRequest(
+					streamRequest,
+					needsThinkingClose,
+					isRetry,
+					realThinkingAsContent,
+					showReasoning,
+					originalModel,
+					nativeToolsManager,
+					retryCount + 1
+				);
+				return;
+			}
+
 			console.error(`[GeminiAPI] Stream request failed: ${response.status}`, errorText);
-			throw new Error(`Stream request failed: ${response.status}`);
+			throw new Error(`Stream request failed: ${response.status} - ${errorText}`);
 		}
 
 		if (!response.body) {
