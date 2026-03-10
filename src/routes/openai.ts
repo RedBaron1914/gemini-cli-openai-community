@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { Env, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ModelInfo, MessageContent } from "../types";
+import { Env, ChatCompletionRequest, ChatCompletionResponse, ChatMessage, ModelInfo, MessageContent, EffortLevel } from "../types";
 import { DEFAULT_MODEL, getAllModelIds } from "../models";
 import { OPENAI_MODEL_OWNER } from "../config";
 import { DEFAULT_THINKING_BUDGET, MIME_TYPE_MAP } from "../constants";
@@ -260,7 +260,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 					console.log("Starting stream generation");
 					const geminiStream = geminiClient.streamContent(model, systemPrompt, cleanedMessages, {
 						includeReasoning,
-						reasoning_effort: reasoning_effort || undefined, // Pass the string effort
+						reasoning_effort: (reasoning_effort as EffortLevel) || undefined, // Pass the string effort
 						tools,
 						tool_choice,
 						showReasoning,
@@ -299,7 +299,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 				console.log("Starting non-streaming completion");
 				const completion = await geminiClient.getCompletion(model, systemPrompt, cleanedMessages, {
 					includeReasoning,
-					reasoning_effort: reasoning_effort || undefined,
+					reasoning_effort: (reasoning_effort as EffortLevel) || undefined,
 					tools,
 					tool_choice,
 					showReasoning,

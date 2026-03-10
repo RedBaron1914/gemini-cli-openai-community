@@ -7,7 +7,8 @@ import {
 	MessageContent,
 	Tool,
 	ToolChoice,
-	GeminiFunctionCall
+	GeminiFunctionCall,
+	EffortLevel
 } from "./types";
 import { AuthManager } from "./auth";
 import { CODE_ASSIST_ENDPOINT, CODE_ASSIST_API_VERSION } from "./config";
@@ -140,6 +141,53 @@ export class GeminiApiClient {
 	}
 
 	/**
+	 * Preprocesses messages to merge consecutive tool response messages into a single message.
+	 * It also maps OpenAI's tool_call_id back to the actual function name expected by Gemini.
+	 * This is required for Gemini to correctly handle parallel tool call results.
+	 */
+	private preprocessMessages(messages: ChatMessage[]): ChatMessage[] {
+		const processed: ChatMessage[] = [];
+		let currentToolMessage: any = null;
+		
+		// Map to store tool_call_id -> function_name mapping from assistant messages
+		const toolNameMap = new Map<string, string>();
+
+		for (const msg of messages) {
+			// Extract function names from assistant's tool calls
+			if (msg.role === "assistant" && msg.tool_calls) {
+				for (const call of msg.tool_calls) {
+					if (call.id && call.function?.name) {
+						toolNameMap.set(call.id, call.function.name);
+					}
+				}
+			}
+
+			if (msg.role === "tool") {
+				// Resolve the real function name, fallback to ID if not found
+				const realFunctionName = msg.tool_call_id ? (toolNameMap.get(msg.tool_call_id) || msg.tool_call_id) : "unknown_function";
+
+				if (!currentToolMessage) {
+					currentToolMessage = {
+						role: "tool",
+						_is_merged_tool: true,
+						_tool_responses: [{ name: realFunctionName, content: msg.content }]
+					};
+				} else {
+					currentToolMessage._tool_responses.push({ name: realFunctionName, content: msg.content });
+				}
+			} else {
+				if (currentToolMessage) {
+					processed.push(currentToolMessage);
+					currentToolMessage = null;
+				}
+				processed.push(msg);
+			}
+		}
+		if (currentToolMessage) processed.push(currentToolMessage);
+		return processed;
+	}
+
+	/**
 	 * Parses a server-sent event (SSE) stream from the Gemini API.
 	 */
 	private async *parseSSEStream(stream: ReadableStream<Uint8Array>): AsyncGenerator<GeminiResponse> {
@@ -189,19 +237,33 @@ export class GeminiApiClient {
 
 		// Handle tool call results (tool role in OpenAI format)
 		if (msg.role === "tool") {
-			return {
-				role: "user",
-				parts: [
-					{
+			const parts: GeminiPart[] = [];
+
+			if ((msg as any)._is_merged_tool && (msg as any)._tool_responses) {
+				// Handle merged tool responses for parallel calls
+				for (const response of (msg as any)._tool_responses) {
+					parts.push({
 						functionResponse: {
-							name: msg.tool_call_id || "unknown_function",
+							name: response.id || "unknown_function",
 							response: {
-								result: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content)
+								result: typeof response.content === "string" ? response.content : JSON.stringify(response.content)
 							}
 						}
+					});
+				}
+			} else {
+				// Single tool response
+				parts.push({
+					functionResponse: {
+						name: msg.tool_call_id || "unknown_function",
+						response: {
+							result: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content)
+						}
 					}
-				]
-			};
+				});
+			}
+
+			return { role: "user", parts };
 		}
 
 		// Handle assistant messages with tool calls
@@ -380,7 +442,9 @@ export class GeminiApiClient {
 		await this.authManager.initializeAuth();
 		const projectId = await this.discoverProjectId();
 
-		const contents = await Promise.all(messages.map((msg) => this.messageToGeminiFormat(msg)));
+		// Preprocess messages to handle parallel tool calls
+		const preprocessedMessages = this.preprocessMessages(messages);
+		const contents = await Promise.all(preprocessedMessages.map((msg) => this.messageToGeminiFormat(msg)));
 
 		if (systemPrompt) {
 			contents.unshift({ role: "user", parts: [{ text: systemPrompt }] });

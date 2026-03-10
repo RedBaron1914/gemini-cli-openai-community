@@ -86,8 +86,8 @@ export function createOpenAIStreamTransformer(model: string): TransformStream<St
 	const creationTime = Math.floor(Date.now() / 1000);
 	const encoder = new TextEncoder();
 	let firstChunk = true;
-	let toolCallId: string | null = null;
-	let toolCallName: string | null = null;
+	let toolCallIndex = 0; // Counter for parallel tool calls
+	let hasToolCalls = false;
 	let usageData: UsageData | undefined;
 
 	return new TransformStream({
@@ -119,15 +119,14 @@ export function createOpenAIStreamTransformer(model: string): TransformStream<St
 				case "tool_code":
 					if (isGeminiFunctionCall(chunk.data)) {
 						const toolData = chunk.data;
-						toolCallName = toolData.name;
-						toolCallId = `call_${crypto.randomUUID()}`;
+						hasToolCalls = true;
 						delta.tool_calls = [
 							{
-								index: 0,
-								id: toolCallId,
+								index: toolCallIndex++, // Increment index for each call
+								id: `call_${crypto.randomUUID()}`,
 								type: "function",
 								function: {
-									name: toolCallName,
+									name: toolData.name,
 									arguments: JSON.stringify(toolData.args)
 								}
 							}
@@ -177,7 +176,7 @@ export function createOpenAIStreamTransformer(model: string): TransformStream<St
 			}
 		},
 		flush(controller) {
-			const finishReason = toolCallId ? "tool_calls" : "stop";
+			const finishReason = hasToolCalls ? "tool_calls" : "stop";
 			const finalChunk: OpenAIFinalChunk = {
 				id: chatID,
 				object: OPENAI_CHAT_COMPLETION_OBJECT,
