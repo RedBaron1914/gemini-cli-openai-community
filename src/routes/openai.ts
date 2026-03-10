@@ -107,7 +107,7 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		const promptShowMatch = systemPrompt.match(showRegex);
 		const promptCleanMatch = systemPrompt.match(cleanRegex);
 		let effortFromPrompt: string | null = null;
-		let showReasoning = true; // Default to showing reasoning if it happens
+		let showReasoning = false; // Default to hiding reasoning
 		let cleanContext = true; // Default to cleaning the context
 
 		if (promptEffortMatch) {

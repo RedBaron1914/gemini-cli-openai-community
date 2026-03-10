@@ -47,8 +47,8 @@ export interface GeminiPart {
 	functionCall?: {
 		name: string;
 		args: object;
-		thoughtSignature?: string;
 	};
+	thoughtSignature?: string;
 	functionResponse?: {
 		name: string;
 		response: {
@@ -282,9 +282,9 @@ export class GeminiApiClient {
 					parts.push({
 						functionCall: {
 							name: toolCall.function.name,
-							args: JSON.parse(toolCall.function.arguments),
-							thoughtSignature: "skip_thought_signature_validator"
-						}
+							args: JSON.parse(toolCall.function.arguments)
+						},
+						thoughtSignature: "skip_thought_signature_validator"
 					});
 				}
 			}
@@ -696,15 +696,18 @@ export class GeminiApiClient {
 			}
 
 			// Handle transient 429/499 rate limits with delay (Agent/Tool call rapid requests)
-			if ((response.status === 429 || response.status === 499) && retryCount < 3) {
-				const match = errorText.match(/Please retry in ([\d.]+)s/);
-				let delayMs = Math.pow(2, retryCount) * 1000; // Exponential backoff fallback: 1s, 2s, 4s
+			if ((response.status === 429 || response.status === 499) && retryCount < 5) {
+				// Match variations like "Please retry in 1.5s" or "Your quota will reset after 1s."
+				const match = errorText.match(/(?:retry in|reset after) ([\d.]+)s/);
+				// Exponential backoff fallback: 2s, 4s, 8s, 16s, 32s (More conservative)
+				let delayMs = Math.pow(2, retryCount + 1) * 1000; 
 				
 				if (match && match[1]) {
-					delayMs = parseFloat(match[1]) * 1000;
+					// Add a 500ms buffer to whatever Google suggests to be safe
+					delayMs = (parseFloat(match[1]) * 1000) + 500;
 				}
 				
-				console.log(`[GeminiAPI] Rate limited (${response.status}). Waiting ${delayMs.toFixed(0)}ms before retrying (Attempt ${retryCount + 1}/3)...`);
+				console.log(`[GeminiAPI] Rate limited (${response.status}). Waiting ${delayMs.toFixed(0)}ms before retrying (Attempt ${retryCount + 1}/5)...`);
 				await new Promise(resolve => setTimeout(resolve, delayMs));
 				
 				yield* this.performStreamRequest(
