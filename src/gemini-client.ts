@@ -47,6 +47,7 @@ export interface GeminiPart {
 	functionCall?: {
 		name: string;
 		args: object;
+		thoughtSignature?: string;
 	};
 	functionResponse?: {
 		name: string;
@@ -281,7 +282,8 @@ export class GeminiApiClient {
 					parts.push({
 						functionCall: {
 							name: toolCall.function.name,
-							args: JSON.parse(toolCall.function.arguments)
+							args: JSON.parse(toolCall.function.arguments),
+							thoughtSignature: "skip_thought_signature_validator"
 						}
 					});
 				}
