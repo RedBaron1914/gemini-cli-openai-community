@@ -1,0 +1,393 @@
+/**
+ * @license
+ * Copyright 2025 Google LLC
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import type { AuthClient } from 'google-auth-library';
+import type {
+  CodeAssistGlobalUserSettingResponse,
+  LoadCodeAssistRequest,
+  LoadCodeAssistResponse,
+  LongRunningOperationResponse,
+  OnboardUserRequest,
+  SetCodeAssistGlobalUserSettingRequest,
+  ClientMetadata,
+  RetrieveUserQuotaRequest,
+  RetrieveUserQuotaResponse,
+  FetchAdminControlsRequest,
+  FetchAdminControlsResponse,
+  ConversationOffered,
+  ConversationInteraction,
+  RecordCodeAssistMetricsRequest,
+  GeminiUserTier,
+} from './types.js';
+import { UserTierId } from './types.js';
+import type {
+  ListExperimentsRequest,
+  ListExperimentsResponse,
+} from './experiments/types.js';
+import type {
+  CountTokensParameters,
+  CountTokensResponse,
+  EmbedContentParameters,
+  EmbedContentResponse,
+  GenerateContentParameters,
+  GenerateContentResponse,
+} from '@google/genai';
+import * as readline from 'node:readline';
+import { Readable } from 'node:stream';
+import type { ContentGenerator } from '../core/contentGenerator.js';
+import {
+  fromCountTokenResponse,
+  fromGenerateContentResponse,
+  toCountTokenRequest,
+  toGenerateContentRequest,
+  type CaCountTokenResponse,
+  type CaGenerateContentResponse,
+} from './converter.js';
+import { type LlmRole } from '../telemetry/types.js';
+/** HTTP options to be used in each of the requests. */
+export interface HttpOptions {
+  /** Additional HTTP headers to be sent with the request. */
+  headers?: Record<string, string>;
+}
+
+export const CODE_ASSIST_ENDPOINT = 'https://cloudcode-pa.googleapis.com';
+export const CODE_ASSIST_API_VERSION = 'v1internal';
+const GENERATE_CONTENT_RETRY_DELAY_IN_MILLISECONDS = 1000;
+
+export class CodeAssistServer implements ContentGenerator {
+  constructor(
+    readonly client: AuthClient,
+    readonly projectId?: string,
+    readonly httpOptions: HttpOptions = {},
+    readonly sessionId?: string,
+    readonly userTier?: UserTierId,
+    readonly userTierName?: string,
+    readonly paidTier?: GeminiUserTier,
+  ) {}
+
+  async generateContentStream(
+    req: GenerateContentParameters,
+    userPromptId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    role: LlmRole,
+  ): Promise<AsyncGenerator<GenerateContentResponse>> {
+    const responses =
+      await this.requestStreamingPost<CaGenerateContentResponse>(
+        'streamGenerateContent',
+        toGenerateContentRequest(
+          req,
+          userPromptId,
+          this.projectId || 'default-project',
+          undefined,
+          undefined,
+        ),
+        req.config?.abortSignal,
+      );
+
+    return (async function* (): AsyncGenerator<GenerateContentResponse> {
+      for await (const response of responses) {
+        yield fromGenerateContentResponse(response);
+      }
+    })();
+  }
+
+  async generateContent(
+    req: GenerateContentParameters,
+    userPromptId: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    role: LlmRole,
+  ): Promise<GenerateContentResponse> {
+    const response = await this.requestPost<CaGenerateContentResponse>(
+      'generateContent',
+      toGenerateContentRequest(
+        req,
+        userPromptId,
+        this.projectId || 'default-project',
+        undefined,
+        undefined,
+      ),
+      req.config?.abortSignal,
+      GENERATE_CONTENT_RETRY_DELAY_IN_MILLISECONDS,
+    );
+
+    return fromGenerateContentResponse(response);
+  }
+
+  async onboardUser(
+    req: OnboardUserRequest,
+  ): Promise<LongRunningOperationResponse> {
+    return this.requestPost<LongRunningOperationResponse>('onboardUser', req);
+  }
+
+  async getOperation(name: string): Promise<LongRunningOperationResponse> {
+    return this.requestGetOperation<LongRunningOperationResponse>(name);
+  }
+
+  async loadCodeAssist(
+    req: LoadCodeAssistRequest,
+  ): Promise<LoadCodeAssistResponse> {
+    try {
+      return await this.requestPost<LoadCodeAssistResponse>(
+        'loadCodeAssist',
+        req,
+      );
+    } catch (e) {
+      if (isVpcScAffectedUser(e)) {
+        return {
+          currentTier: { id: UserTierId.STANDARD },
+        };
+      } else {
+        throw e;
+      }
+    }
+  }
+
+  async refreshAvailableCredits(): Promise<void> {
+    // Stub
+  }
+
+  async fetchAdminControls(
+    req: FetchAdminControlsRequest,
+  ): Promise<FetchAdminControlsResponse> {
+    return this.requestPost<FetchAdminControlsResponse>(
+      'fetchAdminControls',
+      req,
+    );
+  }
+
+  async getCodeAssistGlobalUserSetting(): Promise<CodeAssistGlobalUserSettingResponse> {
+    return this.requestGet<CodeAssistGlobalUserSettingResponse>(
+      'getCodeAssistGlobalUserSetting',
+    );
+  }
+
+  async setCodeAssistGlobalUserSetting(
+    req: SetCodeAssistGlobalUserSettingRequest,
+  ): Promise<CodeAssistGlobalUserSettingResponse> {
+    return this.requestPost<CodeAssistGlobalUserSettingResponse>(
+      'setCodeAssistGlobalUserSetting',
+      req,
+    );
+  }
+
+  async countTokens(req: CountTokensParameters): Promise<CountTokensResponse> {
+    const resp = await this.requestPost<CaCountTokenResponse>(
+      'countTokens',
+      toCountTokenRequest(req),
+    );
+    return fromCountTokenResponse(resp);
+  }
+
+  async embedContent(
+    _req: EmbedContentParameters,
+  ): Promise<EmbedContentResponse> {
+    throw Error();
+  }
+
+  async listExperiments(
+    metadata: ClientMetadata,
+  ): Promise<ListExperimentsResponse> {
+    if (!this.projectId) {
+      throw new Error('projectId is not defined for CodeAssistServer.');
+    }
+    const projectId = this.projectId;
+    const req: ListExperimentsRequest = {
+      project: projectId,
+      metadata: { ...metadata, duetProject: projectId },
+    };
+    return this.requestPost<ListExperimentsResponse>('listExperiments', req);
+  }
+
+  async retrieveUserQuota(
+    req: RetrieveUserQuotaRequest,
+  ): Promise<RetrieveUserQuotaResponse> {
+    return this.requestPost<RetrieveUserQuotaResponse>(
+      'retrieveUserQuota',
+      req,
+    );
+  }
+
+  async recordConversationOffered(
+    _conversationOffered: ConversationOffered,
+  ): Promise<void> {
+    // Stub
+  }
+
+  async recordConversationInteraction(
+    _interaction: ConversationInteraction,
+  ): Promise<void> {
+    // Stub
+  }
+
+  async recordCodeAssistMetrics(
+    _request: RecordCodeAssistMetricsRequest,
+  ): Promise<void> {
+    // Stub
+  }
+
+  async requestPost<T>(
+    method: string,
+    req: object,
+    signal?: AbortSignal,
+    retryDelay: number = 100,
+  ): Promise<T> {
+    const res = await this.client.request<T>({
+      url: this.getMethodUrl(method),
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.httpOptions.headers,
+      },
+      responseType: 'json',
+      body: JSON.stringify(req),
+      signal,
+      retryConfig: {
+        retryDelay,
+        retry: 3,
+        noResponseRetries: 3,
+        statusCodesToRetry: [
+          [429, 429],
+          [499, 499],
+          [500, 599],
+        ],
+      },
+    });
+    return res.data;
+  }
+
+  private async makeGetRequest<T>(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    const res = await this.client.request<T>({
+      url,
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.httpOptions.headers,
+      },
+      responseType: 'json',
+      signal,
+    });
+    return res.data;
+  }
+
+  async requestGet<T>(method: string, signal?: AbortSignal): Promise<T> {
+    return this.makeGetRequest<T>(this.getMethodUrl(method), signal);
+  }
+
+  async requestGetOperation<T>(name: string, signal?: AbortSignal): Promise<T> {
+    return this.makeGetRequest<T>(this.getOperationUrl(name), signal);
+  }
+
+  async requestStreamingPost<T>(
+    method: string,
+    req: object,
+    signal?: AbortSignal,
+  ): Promise<AsyncGenerator<T>> {
+    const res = await this.client.request<AsyncIterable<unknown>>({
+      url: this.getMethodUrl(method),
+      method: 'POST',
+      params: {
+        alt: 'sse',
+      },
+      headers: {
+        'Content-Type': 'application/json',
+        ...this.httpOptions.headers,
+      },
+      responseType: 'stream',
+      body: JSON.stringify(req),
+      signal,
+      retry: false,
+    });
+
+    return (async function* (): AsyncGenerator<T> {
+      const rl = readline.createInterface({
+        input: Readable.from(res.data),
+        crlfDelay: Infinity, // Recognizes '\r\n' and '\n' as line breaks
+      });
+
+      let bufferedLines: string[] = [];
+      for await (const line of rl) {
+        if (line.startsWith('data: ')) {
+          bufferedLines.push(line.slice(6).trim());
+        } else if (line === '') {
+          if (bufferedLines.length === 0) {
+            continue; // no data to yield
+          }
+          yield JSON.parse(bufferedLines.join('\n'));
+          bufferedLines = []; // Reset the buffer after yielding
+        }
+        // Ignore other lines like comments or id fields
+      }
+    })();
+  }
+
+  private getBaseUrl(): string {
+    const endpoint =
+      process.env['CODE_ASSIST_ENDPOINT'] ?? CODE_ASSIST_ENDPOINT;
+    const version =
+      process.env['CODE_ASSIST_API_VERSION'] || CODE_ASSIST_API_VERSION;
+    return `${endpoint}/${version}`;
+  }
+
+  getMethodUrl(method: string): string {
+    return `${this.getBaseUrl()}:${method}`;
+  }
+
+  getOperationUrl(name: string): string {
+    return `${this.getBaseUrl()}/${name}`;
+  }
+}
+
+interface VpcScErrorResponse {
+  response?: {
+    data?: {
+      error?: {
+        details?: unknown[];
+      };
+    };
+  };
+}
+
+function isVpcScErrorResponse(error: unknown): error is VpcScErrorResponse & {
+  response: {
+    data: {
+      error: {
+        details: unknown[];
+      };
+    };
+  };
+} {
+  return (
+    !!error &&
+    typeof error === 'object' &&
+    'response' in error &&
+    !!error.response &&
+    typeof error.response === 'object' &&
+    'data' in error.response &&
+    !!error.response.data &&
+    typeof error.response.data === 'object' &&
+    'error' in error.response.data &&
+    !!error.response.data.error &&
+    typeof error.response.data.error === 'object' &&
+    'details' in error.response.data.error &&
+    Array.isArray(error.response.data.error.details)
+  );
+}
+
+function isVpcScAffectedUser(error: unknown): boolean {
+  if (isVpcScErrorResponse(error)) {
+    return error.response.data.error.details.some(
+      (detail: unknown) =>
+        detail &&
+        typeof detail === 'object' &&
+        'reason' in detail &&
+        detail.reason === 'SECURITY_POLICY_VIOLATED',
+    );
+  }
+  return false;
+}

@@ -137,3 +137,7 @@ dist
 .pnp.*
 .dev.vars
 .wrangler/
+
+# Stable Gemini CLI Fork
+!gemini-cli-stable/
+gemini-cli-stable/**/node_modules/
