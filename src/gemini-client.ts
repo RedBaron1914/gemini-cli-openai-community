@@ -481,7 +481,7 @@ export class GeminiApiClient {
 
 		// For thinking models with fake thinking (fallback when real thinking is not enabled or not requested)
 		let needsThinkingClose = false;
-		if (isThinkingModel && isFakeThinkingEnabled && !includeReasoning) {
+		if (showReasoning && isThinkingModel && isFakeThinkingEnabled && !includeReasoning) {
 			yield* this.generateReasoningOutput(messages, streamThinkingAsContent);
 			needsThinkingClose = streamThinkingAsContent; // Only need to close if we streamed as content
 		}
@@ -733,44 +733,20 @@ export class GeminiApiClient {
 
 		let hasClosedThinking = false;
 		let hasStartedThinking = false;
+		let isThinking = false; // Track if we are currently in a thinking block
 
 		for await (const jsonData of this.parseSSEStream(response.body)) {
 			const candidate = jsonData.response?.candidates?.[0];
 
 			if (candidate?.content?.parts) {
 				for (const part of candidate.content.parts as GeminiPart[]) {
-					// Handle real thinking content from Gemini - only if showReasoning is true
-					if (showReasoning && part.thought === true && part.text) {
-						const thinkingText = part.text;
+					// Handle real thinking content from Gemini
+					if (part.thought === true && part.text) {
+						if (showReasoning) {
+							const thinkingText = part.text;
 
-						if (realThinkingAsContent) {
-							// Stream as content with <think> tags (DeepSeek R1 style)
-							if (!hasStartedThinking) {
-								yield {
-									type: "thinking_content",
-									data: "<think>\n"
-								};
-								hasStartedThinking = true;
-							}
-
-							yield {
-									type: "thinking_content",
-								data: thinkingText
-							};
-						} else {
-							// Stream as separate reasoning field
-							yield {
-								type: "real_thinking",
-								data: thinkingText
-							};
-						}
-					}
-					// Check if text content contains <think> tags (based on your original example) - only if showReasoning is true
-					else if (showReasoning && part.text && part.text.includes("<think>")) {
-						if (realThinkingAsContent) {
-							// Extract thinking content and convert to our format
-							const thinkingMatch = part.text.match(/<think>(.*?)<\/think>/s);
-							if (thinkingMatch) {
+							if (realThinkingAsContent) {
+								// Stream as content with <think> tags (DeepSeek R1 style)
 								if (!hasStartedThinking) {
 									yield {
 										type: "thinking_content",
@@ -781,46 +757,131 @@ export class GeminiApiClient {
 
 								yield {
 									type: "thinking_content",
-									data: thinkingMatch[1]
+									data: thinkingText
 								};
-							}
-
-							// Extract any non-thinking coRecentent
-							const nonThinkingContent = part.text.replace(/<think>.*?<\/think>/gs, "").trim();
-							if (nonThinkingContent) {
-								if (hasStartedThinking && !hasClosedThinking) {
-									yield {
-										type: "thinking_content",
-										data: "\n<\/think>\n\n"
-									};
-									hasClosedThinking = true;
-								}
-								yield { type: "text", data: nonThinkingContent };
-							}
-						} else {
-							// Stream thinking as separate reasoning field
-							const thinkingMatch = part.text.match(/<think>(.*?)<\/think>/s);
-							if (thinkingMatch) {
+							} else {
+								// Stream as separate reasoning field
 								yield {
 									type: "real_thinking",
-									data: thinkingMatch[1]
+									data: thinkingText
 								};
 							}
+						}
+						continue; // Skip yielding this part as text if it's a thought part
+					}
 
-							// Stream non-thinking content as regular text
-							const nonThinkingContent = part.text.replace(/<think>.*?<\/think>/gs, "").trim();
-							if (nonThinkingContent) {
-								yield { type: "text", data: nonThinkingContent };
+					// Check if text content contains <think> tags (e.g. for models that don't use part.thought)
+					if (part.text && (part.text.includes("<think>") || isThinking)) {
+						let text = part.text;
+						
+						if (part.text.includes("<think>")) {
+							isThinking = true;
+						}
+
+						if (showReasoning) {
+							if (realThinkingAsContent) {
+								// Extract thinking content and convert to our format
+								const thinkingMatch = text.match(/<think>(.*?)<\/think>/s);
+								if (thinkingMatch) {
+									if (!hasStartedThinking) {
+										yield {
+											type: "thinking_content",
+											data: "<think>\n"
+										};
+										hasStartedThinking = true;
+									}
+
+									yield {
+										type: "thinking_content",
+										data: thinkingMatch[1]
+									};
+									isThinking = false;
+								} else if (text.includes("<think>")) {
+									// Start of thinking but no end tag yet
+									if (!hasStartedThinking) {
+										yield {
+											type: "thinking_content",
+											data: "<think>\n"
+										};
+										hasStartedThinking = true;
+									}
+									yield {
+										type: "thinking_content",
+										data: text.split("<think>")[1]
+									};
+								} else {
+									// Continuation of thinking
+									yield {
+										type: "thinking_content",
+										data: text
+									};
+								}
+
+								// Extract any non-thinking content if the block closed in this chunk
+								if (text.includes("</think>")) {
+									isThinking = false;
+									const nonThinkingContent = text.split("</think>")[1].trim();
+									if (nonThinkingContent) {
+										if (hasStartedThinking && !hasClosedThinking) {
+											yield {
+												type: "thinking_content",
+												data: "\n<\/think>\n\n"
+											};
+											hasClosedThinking = true;
+										}
+										yield { type: "text", data: nonThinkingContent };
+									}
+								}
+							} else {
+								// Stream thinking as separate reasoning field
+								const thinkingMatch = text.match(/<think>(.*?)<\/think>/s);
+								if (thinkingMatch) {
+									yield {
+										type: "real_thinking",
+										data: thinkingMatch[1]
+									};
+									isThinking = false;
+								} else if (text.includes("<think>")) {
+									yield {
+										type: "real_thinking",
+										data: text.split("<think>")[1]
+									};
+								} else {
+									yield {
+										type: "real_thinking",
+										data: text
+									};
+								}
+
+								// Stream non-thinking content as regular text if block closed
+								if (text.includes("</think>")) {
+									isThinking = false;
+									const nonThinkingContent = text.split("</think>")[1].trim();
+									if (nonThinkingContent) {
+										yield { type: "text", data: nonThinkingContent };
+									}
+								}
+							}
+						} else {
+							// If showReasoning is false, we still need to check for the closing tag
+							if (text.includes("</think>")) {
+								isThinking = false;
+								const nonThinkingContent = text.split("</think>")[1].trim();
+								if (nonThinkingContent) {
+									yield { type: "text", data: nonThinkingContent };
+								}
 							}
 						}
+						continue;
 					}
-					// Handle regular content - only if it's not a thinking part and doesn't contain <think> tags
-					else if (part.text && !part.thought && !part.text.includes("<think>")) {
+
+					// Handle regular content
+					if (part.text) {
 						// Close thinking tag before first real content if needed
 						if ((needsThinkingClose || (realThinkingAsContent && hasStartedThinking)) && !hasClosedThinking) {
 							yield {
 								type: "thinking_content",
-									data: "\n<\/think>\n\n"
+								data: "\n<\/think>\n\n"
 							};
 							hasClosedThinking = true;
 						}

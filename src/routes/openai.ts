@@ -80,19 +80,19 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		const stream = body.stream !== false;
 
 		// Extract system prompt and user/assistant messages first to allow for prompt-based commands
-		let systemPrompt = "";
+		let fullSystemPrompt = "";
 		const otherMessages = messages.filter((msg) => {
 			if (msg.role === "system") {
 				// Handle system messages with both string and array content
 				if (typeof msg.content === "string") {
-					systemPrompt = msg.content;
+					fullSystemPrompt += msg.content + "\n";
 				} else if (Array.isArray(msg.content)) {
 					// For system messages, only extract text content
 					const textContent = msg.content
 						.filter((part) => part.type === "text")
 						.map((part) => part.text || "")
 						.join(" ");
-					systemPrompt = textContent;
+					fullSystemPrompt += textContent + "\n";
 				}
 				return false;
 			}
@@ -103,30 +103,34 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		const effortRegex = /reasoning_effort=(low|medium|high|none)\s*/i;
 		const showRegex = /show_reasoning=(true|false)\s*/i;
 		const cleanRegex = /clean_context=(true|false)\s*/i;
-		const promptEffortMatch = systemPrompt.match(effortRegex);
-		const promptShowMatch = systemPrompt.match(showRegex);
-		const promptCleanMatch = systemPrompt.match(cleanRegex);
+		
+		const promptEffortMatch = fullSystemPrompt.match(effortRegex);
+		const promptShowMatch = fullSystemPrompt.match(showRegex);
+		const promptCleanMatch = fullSystemPrompt.match(cleanRegex);
+		
 		let effortFromPrompt: string | null = null;
-		let showReasoning = false; // Default to hiding reasoning
+		let showReasoning = true; // Default to showing reasoning
 		let cleanContext = true; // Default to cleaning the context
 
 		if (promptEffortMatch) {
 			effortFromPrompt = promptEffortMatch[1].toLowerCase();
-			systemPrompt = systemPrompt.replace(effortRegex, "").trim(); // Clean the prompt
+			fullSystemPrompt = fullSystemPrompt.replace(effortRegex, "").trim();
 			console.log(`Reasoning effort '${effortFromPrompt}' detected in system prompt.`);
 		}
 
 		if (promptShowMatch) {
 			showReasoning = promptShowMatch[1].toLowerCase() === "true";
-			systemPrompt = systemPrompt.replace(showRegex, "").trim(); // Clean the prompt
+			fullSystemPrompt = fullSystemPrompt.replace(showRegex, "").trim();
 			console.log(`Show reasoning set to '${showReasoning}' from system prompt.`);
 		}
 
 		if (promptCleanMatch) {
 			cleanContext = promptCleanMatch[1].toLowerCase() === "true";
-			systemPrompt = systemPrompt.replace(cleanRegex, "").trim(); // Clean the prompt
+			fullSystemPrompt = fullSystemPrompt.replace(cleanRegex, "").trim();
 			console.log(`Clean context set to '${cleanContext}' from system prompt.`);
 		}
+		
+		const systemPrompt = fullSystemPrompt.trim();
 
 		// Determine the final reasoning effort, giving precedence to the system prompt
 		const reasoning_effort =
