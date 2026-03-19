@@ -39,6 +39,7 @@ interface GeminiResponse {
 		candidates?: GeminiCandidate[];
 		usageMetadata?: GeminiUsageMetadata;
 	};
+	traceId?: string;
 }
 
 export interface GeminiPart {
@@ -141,9 +142,50 @@ export class GeminiApiClient {
 		}
 	}
 
+	private sendFakeTelemetry(traceId: string, projectId: string, firstMessageLatency: number, totalLatency: number): void {
+		try {
+			const payload = {
+				project: projectId,
+				metadata: {
+					ideType: "GEMINI_CLI",
+					pluginType: "GEMINI",
+					duetProject: projectId
+				},
+				metrics: [
+					{
+						conversationOffered: {
+							citationCount: "0",
+							includedCode: false,
+							status: 1, // ACTION_STATUS_NO_ERROR
+							traceId: traceId,
+							streamingLatency: {
+								firstMessageLatency: `${(firstMessageLatency / 1000).toFixed(3)}s`,
+								totalLatency: `${(totalLatency / 1000).toFixed(3)}s`
+							},
+							isAgentic: true,
+							initiationMethod: 2 // COMMAND
+						},
+						timestamp: new Date().toISOString()
+					}
+				]
+			};
+
+			// Fire and forget, don't await
+			fetch(`${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:recordCodeAssistMetrics`, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${this.authManager.getAccessToken()}`
+				},
+				body: JSON.stringify(payload)
+			}).catch(() => { /* Silent fail */ });
+		} catch (e) {
+			// Silent fail
+		}
+	}
+
 	/**
 	 * Preprocesses messages to merge consecutive tool response messages into a single message.
-	 * It also maps OpenAI's tool_call_id back to the actual function name expected by Gemini.
 	 * This is required for Gemini to correctly handle parallel tool call results.
 	 */
 	private preprocessMessages(messages: ChatMessage[]): ChatMessage[] {
@@ -735,7 +777,15 @@ export class GeminiApiClient {
 		let hasStartedThinking = false;
 		let isThinking = false; // Track if we are currently in a thinking block
 
+		const startTime = Date.now();
+		let firstChunkTime: number | null = null;
+		let traceId: string | undefined = undefined;
+		const activeProjectId = (streamRequest as any)?.project || "default-project";
+
 		for await (const jsonData of this.parseSSEStream(response.body)) {
+			if (!firstChunkTime) firstChunkTime = Date.now();
+			if (!traceId && jsonData.traceId) traceId = jsonData.traceId;
+
 			const candidate = jsonData.response?.candidates?.[0];
 
 			if (candidate?.content?.parts) {
@@ -931,6 +981,16 @@ export class GeminiApiClient {
 					data: usageData
 				};
 			}
+		}
+
+		// Calculate final latencies and send telemetry in the background
+		const endTime = Date.now();
+		const totalLatency = endTime - startTime;
+		const actualFirstChunkTime = firstChunkTime || endTime;
+		const firstLatency = actualFirstChunkTime - startTime;
+
+		if (traceId && activeProjectId) {
+			this.sendFakeTelemetry(traceId, activeProjectId, firstLatency, totalLatency);
 		}
 	}
 
