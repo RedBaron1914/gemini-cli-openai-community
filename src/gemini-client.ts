@@ -490,10 +490,6 @@ export class GeminiApiClient {
 		const preprocessedMessages = this.preprocessMessages(messages);
 		const contents = await Promise.all(preprocessedMessages.map((msg) => this.messageToGeminiFormat(msg)));
 
-		if (systemPrompt) {
-			contents.unshift({ role: "user", parts: [{ text: systemPrompt }] });
-		}
-
 		// Check if this is a thinking model and which thinking mode to use
 		const isThinkingModel = geminiCliModels[modelId]?.thinking || false;
 		const isRealThinkingEnabled = this.env.ENABLE_REAL_THINKING === "true";
@@ -533,6 +529,7 @@ export class GeminiApiClient {
 			project: string;
 			request: {
 				contents: unknown;
+				systemInstruction?: unknown;
 				generationConfig: unknown;
 				tools: unknown;
 				toolConfig: unknown;
@@ -548,6 +545,12 @@ export class GeminiApiClient {
 				toolConfig: finalToolConfig
 			}
 		};
+
+		if (systemPrompt) {
+			streamRequest.request.systemInstruction = {
+				parts: [{ text: systemPrompt }]
+			};
+		}
 
 		const safetySettings = GenerationConfigValidator.createSafetySettings(this.env);
 		if (safetySettings.length > 0) {
