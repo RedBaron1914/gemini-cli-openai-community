@@ -26,11 +26,23 @@ Transform Google's Gemini models into OpenAI-compatible endpoints using Cloudfla
 |----------|----------------|------------|------------------|-------------|
 |`gemini-3.1-pro-preview` | 1M | 65K | ✅ | Latest Gemini 3.1 Pro Preview model with even more advanced reasoning |
 |`gemini-3.1-flash-lite-preview` | 1M | 65K | ✅ | New Gemini 3.1 Flash Lite model - Google's fastest and most efficient model |
-| `gemini-3-pro-preview` | 1M | 65K | ✅ | Latest Gemini 3.0 Pro Preview model with advanced reasoning |
-| `gemini-3-flash-preview` | 1M | 65K | ✅ | Latest Gemini 3.0 Flash Preview model with advanced reasoning |
+| `gemini-3-flash-preview` | 1M | 65K | ✅ | Gemini 3.0 Flash Preview model with advanced reasoning |
 | `gemini-2.5-pro` | 1M | 65K | ✅ | Latest Gemini 2.5 Pro model with reasoning capabilities |
-| `gemini-2.5-flash` | 1M | 65K | ✅ | Fast Gemini 2.5 Flash model with reasoning capabilities |
-| `gemini-2.5-flash-lite` | 1M | 65K | ✅ | Lightweight version of Gemini 2.5 Flash model with reasoning capabilities |
+| `gemini-2.5-flash` | 1M | 65K | ✅ | Fast Gemini 2.5 Flash model |
+| `gemini-2.5-flash-lite` | 1M | 65K | ✅ | Lightweight version of Gemini 2.5 Flash model |
+
+## 🚀 Advanced Capabilities
+
+This fork includes several enhancements designed for high-reliability agentic workflows (e.g. using Zed, Cursor, or specialized agents):
+
+- 🛠️ **Parallel Tool Calling** - Full support for multiple simultaneous function calls. The proxy intelligently groups tool results and maps OpenAI IDs back to original function names, as required by the Gemini API.
+- 🕵️ **Stealth Mode (Abuse Detection Bypass)** - The proxy automatically generates and sends forged telemetry payloads (including realistic latency, trace tracking, code detection, and citation counts) to mimic official Gemini CLI behavior, significantly reducing the risk of account flagging.
+- 🚦 **Smart Rate Limiting** - Integrated exponential backoff and retry logic. If Google returns a 429 "Too Many Requests" error, the proxy automatically parses the suggested wait time and retries the request up to 5 times.
+- 🎯 **Official System Instructions** - System prompts are passed via the official `systemInstruction` API field, ensuring superior model adherence compared to traditional user-message unshifting.
+- 📦 **Patched Gemini CLI Included** - This repository contains a pre-built, patched version of the **stable Gemini CLI (v0.33.0)** in the `gemini-cli-stable` directory. It is modified to:
+  - Bypass the 25-message "trial" limit by forcing Enterprise tier metadata.
+  - Disable all telemetry and background update checks.
+  - Fix the "flickering terminal" issues present in nightly builds.
 
 > [!IMPORTANT]
 > ### A Note on `projectId` and Model Access
