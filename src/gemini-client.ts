@@ -779,6 +779,7 @@ export class GeminiApiClient {
 		let hasClosedThinking = false;
 		let hasStartedThinking = false;
 		let isThinking = false; // Track if we are currently in a thinking block
+		let hasFunctionCall = false; // Track if any tool was called
 
 		const startTime = Date.now();
 		let firstChunkTime: number | null = null;
@@ -959,6 +960,8 @@ export class GeminiApiClient {
 					}
 					// Handle function calls from Gemini
 					else if (part.functionCall) {
+						hasFunctionCall = true; // Flag that a tool was used (likely for coding)
+						
 						// Close thinking tag before function call if needed
 						if ((needsThinkingClose || (realThinkingAsContent && hasStartedThinking)) && !hasClosedThinking) {
 							yield {
@@ -1001,7 +1004,7 @@ export class GeminiApiClient {
 		const actualFirstChunkTime = firstChunkTime || endTime;
 		const firstLatency = actualFirstChunkTime - startTime;
 		
-		const includedCode = fullGeneratedText.includes("```");
+		const includedCode = hasFunctionCall || fullGeneratedText.includes("```");
 
 		if (traceId && activeProjectId) {
 			this.sendFakeTelemetry(traceId, activeProjectId, firstLatency, totalLatency, includedCode, citationsCount);
