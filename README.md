@@ -40,7 +40,7 @@ This fork includes several enhancements designed for high-reliability agentic wo
 - 🚦 **Smart Rate Limiting** - Integrated exponential backoff and retry logic. If Google returns a 429 "Too Many Requests" error, the proxy automatically parses the suggested wait time and retries the request up to 5 times.
 - 🎯 **Official System Instructions** - System prompts are passed via the official `systemInstruction` API field, ensuring superior model adherence compared to traditional user-message unshifting.
 - 📦 **Patched Gemini CLI Included** - This repository contains a pre-built, patched version of the **stable Gemini CLI (v0.33.0)** in the `gemini-cli-stable` directory. It is modified to:
-  - Bypass the 25-message "trial" limit by forcing Enterprise tier metadata.
+  - Bypass the 25-message "trial" limit by forcing Enterprise tier metadata(If you have projectID set).
   - Disable all telemetry and background update checks.
   - Fix the "flickering terminal" issues present in nightly builds.
 
@@ -672,14 +672,10 @@ The worker supports multimodal conversations with images for vision-capable mode
 - External URLs (now reliably handled by the proxy, which fetches the image directly)
 
 #### Vision-Capable Models
-- `gemini-3-pro-preview`
 - `gemini-3.1-pro-preview`
 - `gemini-3-flash-preview`
 - `gemini-2.5-pro`
 - `gemini-2.5-flash` 
-- `gemini-2.0-flash-001`
-- `gemini-2.0-flash-lite-preview-02-05`
-- `gemini-2.0-pro-exp-02-05`
 
 #### Example with Base64 Image
 ```python
