@@ -142,7 +142,7 @@ export class GeminiApiClient {
 		}
 	}
 
-	private sendFakeTelemetry(traceId: string, projectId: string, firstMessageLatency: number, totalLatency: number): void {
+	private sendFakeTelemetry(traceId: string, projectId: string, firstMessageLatency: number, totalLatency: number, includedCode: boolean = false, citationCount: number = 0): void {
 		try {
 			const payload = {
 				project: projectId,
@@ -154,8 +154,8 @@ export class GeminiApiClient {
 				metrics: [
 					{
 						conversationOffered: {
-							citationCount: "0",
-							includedCode: false,
+							citationCount: String(citationCount),
+							includedCode: includedCode,
 							status: 1, // ACTION_STATUS_NO_ERROR
 							traceId: traceId,
 							streamingLatency: {
@@ -784,12 +784,19 @@ export class GeminiApiClient {
 		let firstChunkTime: number | null = null;
 		let traceId: string | undefined = undefined;
 		const activeProjectId = (streamRequest as any)?.project || "default-project";
+		
+		let fullGeneratedText = "";
+		let citationsCount = 0;
 
 		for await (const jsonData of this.parseSSEStream(response.body)) {
 			if (!firstChunkTime) firstChunkTime = Date.now();
 			if (!traceId && jsonData.traceId) traceId = jsonData.traceId;
 
 			const candidate = jsonData.response?.candidates?.[0];
+
+			if (candidate?.groundingMetadata && candidate.groundingMetadata.groundingChunks) {
+				citationsCount += candidate.groundingMetadata.groundingChunks.length;
+			}
 
 			if (candidate?.content?.parts) {
 				for (const part of candidate.content.parts as GeminiPart[]) {
@@ -940,6 +947,8 @@ export class GeminiApiClient {
 						}
 
 						let processedText = part.text;
+						fullGeneratedText += processedText; // Accumulate text for code detection
+
 						if (nativeToolsManager) {
 							processedText = citationsProcessor.processChunk(
 								part.text,
@@ -991,9 +1000,11 @@ export class GeminiApiClient {
 		const totalLatency = endTime - startTime;
 		const actualFirstChunkTime = firstChunkTime || endTime;
 		const firstLatency = actualFirstChunkTime - startTime;
+		
+		const includedCode = fullGeneratedText.includes("```");
 
 		if (traceId && activeProjectId) {
-			this.sendFakeTelemetry(traceId, activeProjectId, firstLatency, totalLatency);
+			this.sendFakeTelemetry(traceId, activeProjectId, firstLatency, totalLatency, includedCode, citationsCount);
 		}
 	}
 
