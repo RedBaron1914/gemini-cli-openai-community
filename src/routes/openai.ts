@@ -242,6 +242,39 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 		}
 
 		if (stream) {
+			console.log("Starting stream generation");
+			const geminiStream = geminiClient.streamContent(model, systemPrompt, cleanedMessages, {
+				includeReasoning,
+				reasoning_effort: (reasoning_effort as EffortLevel) || undefined, // Pass the string effort
+				tools,
+				tool_choice,
+				showReasoning,
+				...generationOptions
+			});
+
+			let firstResult;
+			try {
+				// Peek at the first chunk to catch any immediate errors (like 429 or 400)
+				// before we commit to sending a 200 OK SSE response.
+				firstResult = await geminiStream.next();
+			} catch (streamError: unknown) {
+				const errorMessage = streamError instanceof Error ? streamError.message : String(streamError);
+				console.error("Stream initialization error:", errorMessage);
+				
+				let status = 500;
+				if (errorMessage.includes("429")) status = 429;
+				else if (errorMessage.includes("401")) status = 401;
+				else if (errorMessage.includes("400")) status = 400;
+
+				return c.json({
+					error: {
+						message: errorMessage,
+						type: status === 429 ? "rate_limit_error" : "api_error",
+						code: status
+					}
+				}, status as any);
+			}
+
 			// Streaming response
 			const { readable, writable } = new TransformStream();
 			const writer = writable.getWriter();
@@ -251,15 +284,9 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 			// Asynchronously pipe data from Gemini to transformer
 			(async () => {
 				try {
-					console.log("Starting stream generation");
-					const geminiStream = geminiClient.streamContent(model, systemPrompt, cleanedMessages, {
-						includeReasoning,
-						reasoning_effort: (reasoning_effort as EffortLevel) || undefined, // Pass the string effort
-						tools,
-						tool_choice,
-						showReasoning,
-						...generationOptions
-					});
+					if (!firstResult.done) {
+						await writer.write(firstResult.value);
+					}
 
 					for await (const chunk of geminiStream) {
 						await writer.write(chunk);
@@ -268,13 +295,9 @@ OpenAIRoute.post("/chat/completions", async (c) => {
 					await writer.close();
 				} catch (streamError: unknown) {
 					const errorMessage = streamError instanceof Error ? streamError.message : String(streamError);
-					console.error("Stream error:", errorMessage);
-					// Try to write an error chunk before closing
-					await writer.write({
-						type: "text",
-						data: `Error: ${errorMessage}`
-					});
-					await writer.close();
+					console.error("Stream error mid-stream:", errorMessage);
+					// Abort the stream if an error occurs mid-stream
+					await writer.abort(streamError);
 				}
 			})();
 
