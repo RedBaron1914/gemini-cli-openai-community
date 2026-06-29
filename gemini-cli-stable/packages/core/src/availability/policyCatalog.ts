@@ -30,6 +30,7 @@ export interface ModelPolicyOptions {
   previewEnabled: boolean;
   userTier?: UserTierId;
   useGemini31?: boolean;
+  useGemini31FlashLite?: boolean;
   useCustomToolModel?: boolean;
 }
 
@@ -40,7 +41,7 @@ const DEFAULT_ACTIONS: ModelPolicyActionMap = {
   unknown: 'prompt',
 };
 
-const SILENT_ACTIONS: ModelPolicyActionMap = {
+export const SILENT_ACTIONS: ModelPolicyActionMap = {
   terminal: 'silent',
   transient: 'silent',
   not_found: 'silent',
@@ -49,7 +50,7 @@ const SILENT_ACTIONS: ModelPolicyActionMap = {
 
 const DEFAULT_STATE: ModelPolicyStateMap = {
   terminal: 'terminal',
-  transient: 'terminal',
+  transient: 'sticky_retry',
   not_found: 'terminal',
   unknown: 'terminal',
 };
@@ -85,6 +86,7 @@ export function getModelPolicyChain(
     const previewModel = resolveModel(
       PREVIEW_GEMINI_MODEL,
       options.useGemini31,
+      options.useGemini31FlashLite,
       options.useCustomToolModel,
     );
     return [

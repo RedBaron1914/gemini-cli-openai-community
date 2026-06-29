@@ -159,7 +159,7 @@ export function parseGoogleApiError(error: unknown): GoogleApiError | null {
   if (typeof errorObj === 'string') {
     try {
       errorObj = JSON.parse(sanitizeJsonString(errorObj));
-    } catch (_) {
+    } catch {
       // Not a JSON string, can't parse.
       return null;
     }
@@ -200,7 +200,7 @@ export function parseGoogleApiError(error: unknown): GoogleApiError | null {
         // The message is a JSON string, but not a nested error object.
         break;
       }
-    } catch (_error) {
+    } catch {
       // It wasn't a JSON string, so we've drilled down as far as we can.
       break;
     }
@@ -231,6 +231,7 @@ export function parseGoogleApiError(error: unknown): GoogleApiError | null {
             }
             // Basic structural check before casting.
             // Since the proto definitions are loose, we primarily rely on @type presence.
+            // eslint-disable-next-line no-restricted-syntax
             if (typeof detailObj['@type'] === 'string') {
               // We can just cast it; the consumer will have to switch on @type
               // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
@@ -283,7 +284,7 @@ function fromGaxiosError(errorObj: object): ErrorShape | undefined {
       try {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         data = JSON.parse(sanitizeJsonString(data));
-      } catch (_) {
+      } catch {
         // Not a JSON string, can't parse.
       }
     }
@@ -333,7 +334,7 @@ function fromApiError(errorObj: object): ErrorShape | undefined {
       try {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
         data = JSON.parse(sanitizeJsonString(data));
-      } catch (_) {
+      } catch {
         // Not a JSON string, can't parse.
         // Try one more fallback: look for the first '{' and last '}'
         if (typeof data === 'string') {
@@ -345,7 +346,7 @@ function fromApiError(errorObj: object): ErrorShape | undefined {
               data = JSON.parse(
                 sanitizeJsonString(data.substring(firstBrace, lastBrace + 1)),
               );
-            } catch (__) {
+            } catch {
               // Still failed
             }
           }

@@ -6,38 +6,35 @@
 
 import type { UpdateObject } from '../ui/utils/updateCheck.js';
 
-/**
- * Handles the auto-update process for the CLI.
- * Permanently disabled.
- */
+/** @internal */
+export function _setUpdateStateForTesting(value: boolean) {
+  // No-op
+}
+
+export function isUpdateInProgress() {
+  return false;
+}
+
+export async function waitForUpdateCompletion(
+  timeoutMs = 30000,
+): Promise<void> {
+  return Promise.resolve();
+}
+
 export function handleAutoUpdate(
-  _info: UpdateObject | null,
-  _settings: any,
-  _projectRoot: string,
-  _spawnFn?: any,
+  info: UpdateObject | null,
+  settings: any,
+  projectRoot: string,
+  spawnFn: any = null,
 ) {
   // HACK: Auto-update is intentionally disabled.
   return;
 }
 
-export function setUpdateHandler(_handler: any, _setUpdateInfo?: any) {
-  // Stub: Do nothing
+export function setUpdateHandler(
+  addItem: any,
+  setUpdateInfo: any,
+) {
+  // Stub
   return () => {};
-}
-
-export function waitForUpdateCompletion(_timeout?: number) {
-  return Promise.resolve();
-}
-
-export function useUpdateEventEmitter() {
-  return () => () => {};
-}
-
-// Stubs for testing compatibility
-export function isUpdateInProgress() {
-  return false;
-}
-
-export function _setUpdateStateForTesting(_state?: boolean) {
-  // No-op
 }

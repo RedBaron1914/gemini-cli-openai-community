@@ -40,9 +40,6 @@ export interface Settings {
   general?: {
     previewFeatures?: boolean;
   };
-  experimental?: {
-    enableEventDrivenScheduler?: boolean;
-  };
 
   // Git-aware file filtering settings
   fileFiltering?: {
@@ -50,6 +47,9 @@ export interface Settings {
     respectGeminiIgnore?: boolean;
     enableRecursiveFileSearch?: boolean;
     customIgnoreFilePaths?: string[];
+  };
+  experimental?: {
+    enableAgents?: boolean;
   };
 }
 
